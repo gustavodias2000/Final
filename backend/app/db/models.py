@@ -145,7 +145,7 @@ class AuditItem(Base):
     motivo = Column(Text, nullable=False)
     fonte_referencia = Column(Text, nullable=True)
     versao_referencia = Column(String(80), nullable=True)
-    cest_status = Column(String(30), nullable=True)
+    cest_status = Column(String(64), nullable=True)
     cest_source_url = Column(Text, nullable=True)
     cest_evidence = Column(Text, nullable=True)
     reference_attempts = Column(JSON, nullable=False, default=list)

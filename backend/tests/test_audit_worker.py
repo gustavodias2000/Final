@@ -303,6 +303,100 @@ class AuditWorkerTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_worker_confirms_local_cest_mismatch_with_external_reference(self) -> None:
+        audit = self._create_audit(ncm_atual="01012100", cest_atual="99.999.99")
+        db = self.Session()
+        try:
+            catalog = CestReferenceVersion(
+                id=uuid4(),
+                source_url="https://example.test/catalogo-cest",
+                version="sha256:external-confirmation",
+                fetched_at=datetime.now(timezone.utc),
+            )
+            entry = CestReference(
+                id=uuid4(),
+                reference_version_id=catalog.id,
+                ncm_codigo="01012100",
+                cest_codigo="01.001.00",
+                descricao="Cavalos",
+            )
+            db.add_all([catalog, entry])
+            db.commit()
+        finally:
+            db.close()
+
+        class ExternalProvider:
+            def lookup(self, ncm: str) -> ReferenceAttempt:
+                return ReferenceAttempt(
+                    "tabelas_fiscais_api", LookupState.FOUND, "https://example.test/ncm/01012100", "CEST confirmado", cest_codes=("01.001.00",)
+                )
+
+        worker = AuditWorker(
+            self.Session,
+            worker_id="worker-cest-external-confirmation",
+            lease_seconds=60,
+            max_attempts=3,
+            external_reference_lookup_enabled=True,
+            reference_lookup_factory=lambda *_: FallbackReferenceLookup((ExternalProvider(), ExternalProvider()), sleep_fn=lambda _: None),
+        )
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertEqual(item.cest_status, "catalog_external_confirmed_mismatch")
+            self.assertEqual(item.cest_sugerido, "01.001.00")
+            self.assertIn("Confirmacao externa", item.cest_evidence)
+        finally:
+            db.close()
+
+    def test_worker_marks_conflict_when_external_source_accepts_current_cest(self) -> None:
+        audit = self._create_audit(ncm_atual="01012100", cest_atual="99.999.99")
+        db = self.Session()
+        try:
+            catalog = CestReferenceVersion(
+                id=uuid4(),
+                source_url="https://example.test/catalogo-cest",
+                version="sha256:external-conflict",
+                fetched_at=datetime.now(timezone.utc),
+            )
+            entry = CestReference(
+                id=uuid4(),
+                reference_version_id=catalog.id,
+                ncm_codigo="01012100",
+                cest_codigo="01.001.00",
+                descricao="Cavalos",
+            )
+            db.add_all([catalog, entry])
+            db.commit()
+        finally:
+            db.close()
+
+        class ExternalProvider:
+            def lookup(self, ncm: str) -> ReferenceAttempt:
+                return ReferenceAttempt(
+                    "tabelas_fiscais_api", LookupState.FOUND, "https://example.test/ncm/01012100", "CEST divergente", cest_codes=("99.999.99",)
+                )
+
+        worker = AuditWorker(
+            self.Session,
+            worker_id="worker-cest-external-conflict",
+            lease_seconds=60,
+            max_attempts=3,
+            external_reference_lookup_enabled=True,
+            reference_lookup_factory=lambda *_: FallbackReferenceLookup((ExternalProvider(), ExternalProvider()), sleep_fn=lambda _: None),
+        )
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertEqual(item.cest_status, "catalog_external_conflict")
+            self.assertIsNone(item.cest_sugerido)
+            self.assertEqual(item.status, "pending_review")
+        finally:
+            db.close()
+
     def test_worker_records_prefix_cest_rule_without_automatic_suggestion(self) -> None:
         audit = self._create_audit()
         db = self.Session()

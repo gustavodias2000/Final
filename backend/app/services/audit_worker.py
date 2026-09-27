@@ -35,6 +35,7 @@ from app.services.reference.fallback_lookup import (
     AzxManualProvider,
     FallbackReferenceLookup,
     LocalCatalogProvider,
+    LookupState,
     NcmApiProvider,
     ReferenceLookupResult,
     TabelasFiscaisProvider,
@@ -243,7 +244,12 @@ class AuditWorker:
         lookup = self.reference_lookup_factory(cest_by_ncm, source_url, version)
         resolved: dict[str, ReferenceLookupResult] = {}
         for result in results:
-            if result.get("cest_status") not in (None, "catalog_not_found"):
+            if result.get("cest_status") not in {
+                None,
+                "catalog_not_found",
+                "catalog_current_mismatch",
+                "catalog_prefix_current_mismatch",
+            }:
                 continue
             ncm = normalize_ncm(result.get("ncm_sugerido") or result.get("ncm_atual"))
             if not ncm:
@@ -262,7 +268,52 @@ class AuditWorker:
         result: dict[str, object], outcome: ReferenceLookupResult
     ) -> None:
         attempt = outcome.attempt
+        previous_status = str(result.get("cest_status") or "")
+        previous_evidence = str(result.get("cest_evidence") or "")
+        current_cest = result.get("cest_atual")
+        local_suggestion = result.get("cest_sugerido")
+        is_local_mismatch = previous_status in {
+            "catalog_current_mismatch",
+            "catalog_prefix_current_mismatch",
+        }
         result["reference_attempts"] = [entry.as_dict() for entry in outcome.attempts]
+
+        if is_local_mismatch:
+            if attempt.state is not LookupState.FOUND:
+                result["cest_evidence"] = (
+                    f"{previous_evidence} Consulta externa {attempt.source}: "
+                    f"{attempt.detail or attempt.state.value}."
+                ).strip()
+                return
+
+            external_codes = attempt.cest_codes
+            external_conflicts = (
+                current_cest in external_codes
+                or (local_suggestion is not None and local_suggestion not in external_codes)
+            )
+            result["cest_source_url"] = attempt.source_url
+            result["cest_evidence"] = (
+                f"{previous_evidence} Confirmacao externa {attempt.source}: "
+                f"opcoes {', '.join(external_codes) or 'nenhuma'}; {attempt.detail or 'consulta concluida'}."
+            ).strip()
+            if external_conflicts:
+                result["cest_status"] = "catalog_external_conflict"
+                result["cest_sugerido"] = None
+                if result["status"] in {"no_suggestion", "suggested"}:
+                    result["status"] = "pending_review"
+                result["motivo"] = (
+                    f"{result['motivo']} A confirmacao externa diverge do catalogo local; "
+                    "nao ha sugestao automatica de CEST."
+                )
+                return
+
+            result["cest_status"] = "catalog_external_confirmed_mismatch"
+            if len(external_codes) == 1 and external_codes[0] != current_cest:
+                result["cest_sugerido"] = external_codes[0]
+                if result["status"] in {"no_suggestion", "pending_review"}:
+                    result["status"] = "suggested"
+            return
+
         result["cest_source_url"] = attempt.source_url
         result["cest_evidence"] = attempt.detail
         result["cest_status"] = f"{attempt.source}_{attempt.state.value}"

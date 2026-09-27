@@ -22,3 +22,12 @@ Cada item persiste as tentativas com fonte, estado, URL e detalhe. A consulta
 externa permanece opt-in e limitada por
 `EXTERNAL_REFERENCE_LOOKUP_MAX_UNIQUE_NCMS` (padrao: 100), protegendo o limite
 gratuito das APIs e auditorias grandes.
+
+Quando o catálogo local encontra um CEST atual incompatível, a Tabelas Fiscais
+é consultada uma vez para confirmação. Se ela também não aceitar o CEST atual,
+o resultado fica como incompatibilidade confirmada. Se aceitar o CEST atual ou
+contradizer o CEST sugerido pelo catálogo local, o resultado é marcado como
+conflito e exige revisão humana; nenhuma sugestão automática é mantida.
+
+A NCM.api.br continua sendo usada apenas para confirmação de NCM. Ela não é
+tratada como fonte de CEST sem um contrato documentado que exponha esse dado.
