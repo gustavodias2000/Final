@@ -1,0 +1,23 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+backend/test.db
+
+# JavaScript
+frontend/node_modules/
+frontend/dist/
+
+# Local IDE files
+.idea/
+.vscode/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
