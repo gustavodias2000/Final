@@ -41,32 +41,30 @@
   -webkit-font-smoothing: antialiased;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1317;
-    --surface: #131b20;
-    --surface-sunken: #10171b;
-    --surface-raised: #182228;
-    --ink: #e4ebee;
-    --ink-2: #a9b8c1;
-    --ink-3: #8a9ba5;
-    --line: rgba(200, 220, 232, 0.13);
-    --line-soft: rgba(200, 220, 232, 0.07);
-    --line-strong: rgba(200, 220, 232, 0.36);
-    --accent: #7db2d6;
-    --accent-strong: #a3cbe6;
-    --accent-soft: rgba(125, 178, 214, 0.12);
-    --accent-ink: #0b1a24;
-    --amber: #e6b366;
-    --amber-bg: rgba(230, 179, 102, 0.12);
-    --green: #6fcf9f;
-    --green-bg: rgba(111, 207, 159, 0.12);
-    --red: #f09a93;
-    --red-bg: rgba(240, 154, 147, 0.12);
-    --mark: rgba(230, 179, 102, 0.26);
-    --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 16px 32px -24px rgba(0, 0, 0, 0.8);
-    color-scheme: dark;
-  }
+:root[data-theme="dark"] {
+  --bg: #0d1317;
+  --surface: #131b20;
+  --surface-sunken: #10171b;
+  --surface-raised: #182228;
+  --ink: #e4ebee;
+  --ink-2: #a9b8c1;
+  --ink-3: #8a9ba5;
+  --line: rgba(200, 220, 232, 0.13);
+  --line-soft: rgba(200, 220, 232, 0.07);
+  --line-strong: rgba(200, 220, 232, 0.36);
+  --accent: #7db2d6;
+  --accent-strong: #a3cbe6;
+  --accent-soft: rgba(125, 178, 214, 0.12);
+  --accent-ink: #0b1a24;
+  --amber: #e6b366;
+  --amber-bg: rgba(230, 179, 102, 0.12);
+  --green: #6fcf9f;
+  --green-bg: rgba(111, 207, 159, 0.12);
+  --red: #f09a93;
+  --red-bg: rgba(240, 154, 147, 0.12);
+  --mark: rgba(230, 179, 102, 0.26);
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.3), 0 16px 32px -24px rgba(0, 0, 0, 0.8);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -106,6 +104,7 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 .button-ghost { color: var(--ink-2); background: transparent; border-color: var(--line); }
 .button-ghost:hover:not(:disabled) { color: var(--ink); background: var(--surface-raised); }
 .button-lg { min-height: 44px; padding: 0 18px; font-size: 14px; }
+.button-icon { width: 38px; padding: 0; }
 
 /* ---------- Topbar ---------- */
 .topbar {
@@ -125,7 +124,8 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 }
 .brand { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 620; letter-spacing: -0.01em; }
 .brand-mark { width: 30px; height: 30px; display: grid; place-items: center; color: var(--accent-ink); background: var(--accent); border-radius: 8px; }
-.topbar-meta { display: flex; align-items: center; gap: 18px; }
+.topbar-meta { display: flex; align-items: center; gap: 8px; }
+.topbar-meta .trust-note { margin-right: 12px; }
 .trust-note { display: flex; align-items: center; gap: 7px; color: var(--ink-3); font-size: 12.5px; }
 
 /* ---------- Estrutura ---------- */
@@ -380,7 +380,8 @@ tr.row-pending-rejected, tr.row-pending-rejected:hover { background: color-mix(i
 .login-facts li { display: flex; gap: 12px; align-items: flex-start; color: #c6d8e3; font-size: 13.5px; }
 .login-facts svg { flex: none; margin-top: 2px; color: #8fc0e0; }
 
-.login-main { padding: 40px 24px; display: grid; place-items: center; }
+.login-main { position: relative; padding: 40px 24px; display: grid; place-items: center; }
+.login-theme { position: absolute; top: 20px; right: 20px; }
 .login-form { width: min(100%, 360px); display: grid; gap: 18px; }
 .login-form h2 { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
 .login-form > header p { margin-top: 6px; color: var(--ink-2); font-size: 13.5px; }

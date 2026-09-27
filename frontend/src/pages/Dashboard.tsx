@@ -21,6 +21,7 @@ import {
 import { getAudit, getLatestAudit, reviewAuditItem, uploadAudit } from "../api/audits";
 import type { AuditItem, AuditItemStatus, AuditStatus, AuditUploadResponse, ReviewDecision } from "../api/contracts";
 import { useAuth } from "../auth/AuthContext";
+import { ThemeToggle } from "../theme";
 
 type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_suggestion";
 
@@ -430,6 +431,7 @@ export default function Dashboard() {
         </div>
         <div className="topbar-meta">
           <span className="trust-note"><ListChecks size={15} aria-hidden="true" /> Recomendações exigem revisão humana</span>
+          <ThemeToggle />
           <button className="button button-ghost" onClick={handleLogout}><LogOut size={15} aria-hidden="true" /> Sair</button>
         </div>
       </header>

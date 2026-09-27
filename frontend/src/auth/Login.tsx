@@ -4,6 +4,7 @@ import { Eye, EyeOff, FileCheck2, History, LoaderCircle, ShieldCheck, UserCheck 
 
 import api from "../api/client";
 import { useAuth } from "./AuthContext";
+import { ThemeToggle } from "../theme";
 
 type LoginError = { message: string; credentials: boolean };
 
@@ -55,6 +56,7 @@ export default function Login() {
       </aside>
 
       <main className="login-main">
+        <ThemeToggle className="login-theme" />
         <form className="login-form" onSubmit={handleSubmit}>
           <header>
             <h2>Entrar</h2>
