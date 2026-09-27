@@ -53,7 +53,13 @@ class AuditWorkerTests(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
-    def _create_audit(self, *, expired_lease: bool = False) -> Audit:
+    def _create_audit(
+        self,
+        *,
+        expired_lease: bool = False,
+        ncm_atual: str = "00000000",
+        cest_atual: str | None = None,
+    ) -> Audit:
         db = self.Session()
         try:
             tenant = Tenant(id=uuid4(), nome="Empresa de teste")
@@ -88,8 +94,8 @@ class AuditWorkerTests(unittest.TestCase):
                 row_number=1,
                 codigo_produto="SKU-CAVALO",
                 descricao="Cavalos reprodutores de raça pura",
-                ncm_atual="00000000",
-                cest_atual=None,
+                ncm_atual=ncm_atual,
+                cest_atual=cest_atual,
             )
             db.add_all([tenant, reference_version, ncm, audit, input_item])
             db.commit()
@@ -189,6 +195,76 @@ class AuditWorkerTests(unittest.TestCase):
             self.assertEqual(item.cest_status, "catalog_found")
             self.assertEqual(item.cest_source_url, "https://example.test/catalogo-cest")
             self.assertIn("sha256:local-cest", item.cest_evidence)
+        finally:
+            db.close()
+
+    def test_worker_flags_current_cest_not_eligible_for_exact_ncm_rule(self) -> None:
+        audit = self._create_audit(ncm_atual="01012100", cest_atual="99.999.99")
+        db = self.Session()
+        try:
+            catalog = CestReferenceVersion(
+                id=uuid4(),
+                source_url="https://example.test/catalogo-cest",
+                version="sha256:validate-current-cest",
+                fetched_at=datetime.now(timezone.utc),
+            )
+            entry = CestReference(
+                id=uuid4(),
+                reference_version_id=catalog.id,
+                ncm_codigo="01012100",
+                cest_codigo="01.001.00",
+                descricao="Cavalos",
+            )
+            db.add_all([catalog, entry])
+            db.commit()
+        finally:
+            db.close()
+
+        worker = AuditWorker(self.Session, worker_id="worker-validacao-cest", lease_seconds=60, max_attempts=3)
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertEqual(item.cest_status, "catalog_current_mismatch")
+            self.assertEqual(item.cest_sugerido, "01.001.00")
+            self.assertEqual(item.status, "suggested")
+            self.assertIn("CEST atual 99.999.99 nao e compativel", item.motivo)
+        finally:
+            db.close()
+
+    def test_worker_keeps_current_cest_when_it_is_eligible_for_exact_ncm_rule(self) -> None:
+        audit = self._create_audit(ncm_atual="01012100", cest_atual="01.001.00")
+        db = self.Session()
+        try:
+            catalog = CestReferenceVersion(
+                id=uuid4(),
+                source_url="https://example.test/catalogo-cest",
+                version="sha256:validate-compatible-cest",
+                fetched_at=datetime.now(timezone.utc),
+            )
+            entry = CestReference(
+                id=uuid4(),
+                reference_version_id=catalog.id,
+                ncm_codigo="01012100",
+                cest_codigo="01.001.00",
+                descricao="Cavalos",
+            )
+            db.add_all([catalog, entry])
+            db.commit()
+        finally:
+            db.close()
+
+        worker = AuditWorker(self.Session, worker_id="worker-cest-compativel", lease_seconds=60, max_attempts=3)
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertEqual(item.cest_status, "catalog_current_match")
+            self.assertIsNone(item.cest_sugerido)
+            self.assertEqual(item.status, "no_suggestion")
+            self.assertIn("CEST atual 01.001.00 consta", item.cest_evidence)
         finally:
             db.close()
 

@@ -629,6 +629,10 @@ function EvidencePanel({ item }: { item: AuditItem }) {
 function formatCestStatus(status: string) {
   const labels: Record<string, string> = {
     catalog_found: "Encontrado no catálogo local",
+    catalog_current_match: "CEST atual compatível com o catálogo",
+    catalog_current_mismatch: "CEST atual incompatível com o NCM",
+    catalog_prefix_current_match: "CEST atual coberto por regra parcial; revisar",
+    catalog_prefix_current_mismatch: "CEST atual incompatível com regra parcial; revisar",
     catalog_ranked: "Selecionado por ranking de descrição",
     catalog_multiple: "Múltiplas opções para revisão",
     catalog_prefix_match: "Correspondência parcial; sem sugestão automática",

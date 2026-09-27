@@ -341,12 +341,8 @@ class AuditWorker:
                 continue
 
             is_prefix_match = longest_prefix_length < len(ncm)
+            current_cest = result.get("cest_atual")
             ranked_candidates = AuditWorker._rank_cest_candidates(result.get("descricao"), matched_rules)
-            result["cest_status"] = (
-                "catalog_prefix_match"
-                if is_prefix_match
-                else "catalog_found" if len(candidates) == 1 else "catalog_multiple"
-            )
             result["cest_source_url"] = version.source_url
             ranking_evidence = (
                 " Ranking por descrição: "
@@ -358,7 +354,31 @@ class AuditWorker:
                 f"Catalogo CEST {version.version}; regra NCM {ncm[:longest_prefix_length]}; "
                 f"NCM consultado {ncm}; opcoes: {', '.join(candidates)}.{ranking_evidence}"
             )
-            if not is_prefix_match and len(candidates) == 1 and candidates[0] != result.get("cest_atual"):
+            if current_cest:
+                if current_cest in candidates:
+                    result["cest_status"] = (
+                        "catalog_prefix_current_match" if is_prefix_match else "catalog_current_match"
+                    )
+                    result["cest_evidence"] = (
+                        f"{result['cest_evidence']} CEST atual {current_cest} consta entre as opcoes elegiveis."
+                    )
+                    continue
+
+                result["cest_status"] = (
+                    "catalog_prefix_current_mismatch" if is_prefix_match else "catalog_current_mismatch"
+                )
+                result["motivo"] = (
+                    f"{result['motivo']} CEST atual {current_cest} nao e compativel com os CESTs "
+                    "elegiveis para o NCM consultado; requer revisao humana."
+                )
+            else:
+                result["cest_status"] = (
+                    "catalog_prefix_match"
+                    if is_prefix_match
+                    else "catalog_found" if len(candidates) == 1 else "catalog_multiple"
+                )
+
+            if not is_prefix_match and len(candidates) == 1 and candidates[0] != current_cest:
                 result["cest_sugerido"] = candidates[0]
                 if result["status"] == "no_suggestion":
                     result["status"] = "suggested"
@@ -367,9 +387,10 @@ class AuditWorker:
                 )
             elif not is_prefix_match and len(candidates) > 1:
                 selected = AuditWorker._select_ranked_cest(ranked_candidates)
-                if selected and selected != result.get("cest_atual"):
+                if selected and selected != current_cest:
                     result["cest_sugerido"] = selected
-                    result["cest_status"] = "catalog_ranked"
+                    if not current_cest:
+                        result["cest_status"] = "catalog_ranked"
                     if result["status"] == "no_suggestion":
                         result["status"] = "suggested"
                     result["motivo"] = (
