@@ -268,6 +268,41 @@ class AuditWorkerTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_worker_queues_cest_mismatch_without_a_safe_replacement(self) -> None:
+        audit = self._create_audit(ncm_atual="01012100", cest_atual="99.999.99")
+        db = self.Session()
+        try:
+            catalog = CestReferenceVersion(
+                id=uuid4(),
+                source_url="https://example.test/catalogo-cest",
+                version="sha256:ambiguous-current-cest",
+                fetched_at=datetime.now(timezone.utc),
+            )
+            db.add_all([
+                catalog,
+                CestReference(
+                    id=uuid4(), reference_version_id=catalog.id, ncm_codigo="01012100", cest_codigo="01.001.00"
+                ),
+                CestReference(
+                    id=uuid4(), reference_version_id=catalog.id, ncm_codigo="01012100", cest_codigo="01.002.00"
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        worker = AuditWorker(self.Session, worker_id="worker-cest-ambiguous", lease_seconds=60, max_attempts=3)
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertEqual(item.cest_status, "catalog_current_mismatch")
+            self.assertIsNone(item.cest_sugerido)
+            self.assertEqual(item.status, "pending_review")
+        finally:
+            db.close()
+
     def test_worker_records_prefix_cest_rule_without_automatic_suggestion(self) -> None:
         audit = self._create_audit()
         db = self.Session()

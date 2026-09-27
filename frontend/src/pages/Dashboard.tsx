@@ -22,7 +22,7 @@ import { getAudit, getLatestAudit, reviewAuditItem, uploadAudit } from "../api/a
 import type { AuditItem, AuditItemStatus, AuditStatus, AuditUploadResponse, ReviewDecision } from "../api/contracts";
 import { useAuth } from "../auth/AuthContext";
 
-type Filter = "all" | "review" | "approved" | "rejected" | "no_suggestion";
+type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_suggestion";
 
 // A API recusa (409) uma segunda revisão do mesmo item; a decisão fica retida
 // no navegador por alguns segundos para que um clique errado possa ser desfeito.
@@ -33,6 +33,13 @@ const LAST_AUDIT_ID_KEY = "last_audit_id";
 
 const NCM_GROUPS = [4, 2, 2];
 const CEST_GROUPS = [2, 3, 2];
+const CEST_ALERT_STATUSES = new Set([
+  "catalog_current_mismatch",
+  "catalog_prefix_current_match",
+  "catalog_prefix_current_mismatch",
+  "catalog_multiple",
+  "catalog_not_found",
+]);
 
 function uploadErrorMessage(error: unknown): string {
   if (!axios.isAxiosError(error)) {
@@ -79,6 +86,7 @@ const runMeta: Record<AuditStatus, string> = {
 const tiles: { key: Filter; label: string; tone: string }[] = [
   { key: "all", label: "Produtos", tone: "" },
   { key: "review", label: "Aguardando revisão", tone: "warning" },
+  { key: "cest_alert", label: "Alertas de CEST", tone: "danger" },
   { key: "approved", label: "Aprovados", tone: "success" },
   { key: "rejected", label: "Rejeitados", tone: "danger" },
   { key: "no_suggestion", label: "Sem sugestão", tone: "neutral" },
@@ -88,18 +96,57 @@ function needsReview(item: AuditItem) {
   return item.status === "suggested" || item.status === "pending_review";
 }
 
+function hasCestAlert(item: AuditItem) {
+  return CEST_ALERT_STATUSES.has(item.cest_status ?? "");
+}
+
 function matchesFilter(item: AuditItem, filter: Filter) {
   if (filter === "all") return true;
   if (filter === "review") return needsReview(item);
+  if (filter === "cest_alert") return hasCestAlert(item);
   return item.status === filter;
 }
 
 // Pendências primeiro, e entre elas as de menor confiança, que pedem mais atenção.
 function byUrgency(a: AuditItem, b: AuditItem) {
+  const cestAlertA = hasCestAlert(a);
+  const cestAlertB = hasCestAlert(b);
+  if (cestAlertA !== cestAlertB) return cestAlertA ? -1 : 1;
   const pendingA = needsReview(a);
   const pendingB = needsReview(b);
   if (pendingA !== pendingB) return pendingA ? -1 : 1;
   return pendingA ? a.score - b.score : 0;
+}
+
+type ClassificationResult = { label: string; tone: "success" | "warning" | "danger" | "neutral" };
+
+function ncmResult(item: AuditItem): ClassificationResult {
+  return item.ncm_sugerido
+    ? { label: "Alteração sugerida", tone: "warning" }
+    : { label: "Sem alteração sugerida", tone: "neutral" };
+}
+
+function cestResult(item: AuditItem): ClassificationResult {
+  switch (item.cest_status) {
+    case "catalog_current_match":
+      return { label: "Compatível", tone: "success" };
+    case "catalog_current_mismatch":
+      return { label: "Incompatível", tone: "danger" };
+    case "catalog_prefix_current_match":
+      return { label: "Regra parcial: revisar", tone: "warning" };
+    case "catalog_prefix_current_mismatch":
+      return { label: "Incompatível: revisar", tone: "danger" };
+    case "catalog_not_found":
+      return { label: "Não verificado", tone: "warning" };
+    case "catalog_multiple":
+      return { label: "Múltiplas opções", tone: "warning" };
+    case "catalog_ranked":
+      return { label: "Sugestão disponível", tone: "warning" };
+    case "catalog_found":
+      return { label: "Referência encontrada", tone: "neutral" };
+    default:
+      return { label: "Não verificado", tone: "neutral" };
+  }
 }
 
 function rowSelector(id: string) {
@@ -194,6 +241,7 @@ export default function Dashboard() {
     return {
       all: items.length,
       review: items.filter(needsReview).length,
+      cest_alert: items.filter(hasCestAlert).length,
       approved: items.filter((item) => item.status === "approved").length,
       rejected: items.filter((item) => item.status === "rejected").length,
       no_suggestion: items.filter((item) => item.status === "no_suggestion").length,
@@ -207,7 +255,7 @@ export default function Dashboard() {
     return audit.data.filter((item) => {
       if (!matchesFilter(item, filter)) return false;
       if (!normalizedQuery) return true;
-      const text = [item.codigo_produto, item.descricao, item.ncm_atual, item.ncm_sugerido]
+      const text = [item.codigo_produto, item.descricao, item.ncm_atual, item.ncm_sugerido, item.cest_atual, item.cest_sugerido]
         .filter(Boolean)
         .join(" ")
         .toLocaleLowerCase("pt-BR");
@@ -344,14 +392,16 @@ export default function Dashboard() {
 
   function exportResults() {
     if (!audit?.data.length) return;
-    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "CEST atual", "CEST sugerido", "Score", "Status", "Motivo", "Status CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
+    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
     const rows = audit.data.map((item) => [
       item.codigo_produto,
       item.descricao,
       item.ncm_atual ?? "",
       item.ncm_sugerido ?? "",
+      ncmResult(item).label,
       item.cest_atual ?? "",
       item.cest_sugerido ?? "",
+      cestResult(item).label,
       item.score.toString(),
       statusMeta[item.status].label,
       item.motivo,
@@ -470,7 +520,7 @@ export default function Dashboard() {
             {!audit.data.length && audit.status === "completed" ? <EmptyState icon={<FileSpreadsheet size={20} />} title="Nenhum produto encontrado" text="A planilha não trouxe linhas válidas para auditar." /> : null}
             {audit.data.length ? <div className="table-wrap">
               <table>
-                <thead><tr><th>Produto</th><th>NCM atual e sugerido</th><th>CEST</th><th className="num">Confiança</th><th>Estado</th><th className="actions-cell"><span className="sr-only">Decisão</span></th></tr></thead>
+                <thead><tr><th>Produto</th><th>Resultado NCM</th><th>Resultado CEST</th><th className="num">Confiança</th><th>Decisão</th><th className="actions-cell"><span className="sr-only">Decisão</span></th></tr></thead>
                 <tbody>
                   {filteredItems.map((item) => <AuditRow
                     key={item.id}
@@ -512,6 +562,8 @@ function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
   onUndo: (item: AuditItem) => void;
 }) {
   const meta = pending ? decisionMeta[pending] : statusMeta[item.status];
+  const ncmClassification = ncmResult(item);
+  const cestClassification = cestResult(item);
   const canReview = needsReview(item);
   const decided = item.status === "approved" || item.status === "rejected";
   const hasEvidence = Boolean(item.fonte_referencia || item.cest_status || item.cest_evidence || item.cest_source_url || item.reference_attempts?.length);
@@ -530,11 +582,17 @@ function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
         </div>
       </td>
       <td className="cell-ncm" data-label="NCM">
-        <CodeChange label="NCM" current={item.ncm_atual} suggested={item.ncm_sugerido} groups={NCM_GROUPS} empty="Sem NCM informado" />
+        <div className="classification">
+          <CodeChange label="NCM" current={item.ncm_atual} suggested={item.ncm_sugerido} groups={NCM_GROUPS} empty="Sem NCM informado" />
+          <span className={`badge ${ncmClassification.tone}`}>NCM: {ncmClassification.label}</span>
+        </div>
         <span className="reason">{item.motivo}</span>
       </td>
       <td className="cell-cest" data-label="CEST">
-        <CodeChange label="CEST" current={item.cest_atual} suggested={item.cest_sugerido} groups={CEST_GROUPS} empty={item.cest_status === "catalog_not_found" ? "Não encontrado" : "Sem CEST informado"} />
+        <div className="classification">
+          <CodeChange label="CEST" current={item.cest_atual} suggested={item.cest_sugerido} groups={CEST_GROUPS} empty={item.cest_status === "catalog_not_found" ? "Não encontrado" : "Sem CEST informado"} />
+          <span className={`badge ${cestClassification.tone}`}>CEST: {cestClassification.label}</span>
+        </div>
       </td>
       <td className="num cell-score" data-label="Confiança"><Confidence score={item.score} /></td>
       <td className="cell-status"><span className={`badge ${meta.tone}`}>{meta.label}</span></td>

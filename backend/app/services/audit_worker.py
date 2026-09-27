@@ -371,6 +371,8 @@ class AuditWorker:
                     f"{result['motivo']} CEST atual {current_cest} nao e compativel com os CESTs "
                     "elegiveis para o NCM consultado; requer revisao humana."
                 )
+                if result["status"] == "no_suggestion":
+                    result["status"] = "pending_review"
             else:
                 result["cest_status"] = (
                     "catalog_prefix_match"
@@ -380,7 +382,7 @@ class AuditWorker:
 
             if not is_prefix_match and len(candidates) == 1 and candidates[0] != current_cest:
                 result["cest_sugerido"] = candidates[0]
-                if result["status"] == "no_suggestion":
+                if result["status"] in {"no_suggestion", "pending_review"}:
                     result["status"] = "suggested"
                 result["motivo"] = (
                     f"{result['motivo']} CEST sugerido pelo catalogo local versionado; requer revisao humana."
@@ -391,7 +393,7 @@ class AuditWorker:
                     result["cest_sugerido"] = selected
                     if not current_cest:
                         result["cest_status"] = "catalog_ranked"
-                    if result["status"] == "no_suggestion":
+                    if result["status"] in {"no_suggestion", "pending_review"}:
                         result["status"] = "suggested"
                     result["motivo"] = (
                         f"{result['motivo']} CEST selecionado entre opções da mesma NCM por similaridade "

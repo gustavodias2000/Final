@@ -224,7 +224,7 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 .summary {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
@@ -294,6 +294,7 @@ tr.row-pending-rejected, tr.row-pending-rejected:hover { background: color-mix(i
 
 .code-change { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .code-change svg { flex: none; color: var(--ink-3); }
+.classification { display: grid; justify-items: start; gap: 7px; }
 .code { color: var(--ink); font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
 .code-old { color: var(--ink-3); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink-3) 55%, transparent); }
 .code-new { font-weight: 600; }
