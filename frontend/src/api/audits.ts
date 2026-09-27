@@ -18,6 +18,11 @@ export async function getAudit(auditId: string): Promise<AuditUploadResponse> {
   return data;
 }
 
+export async function getLatestAudit(): Promise<AuditUploadResponse> {
+  const { data } = await api.get<AuditUploadResponse>("/api/v1/audits/latest");
+  return data;
+}
+
 export async function reviewAuditItem(
   auditId: string,
   itemId: string,

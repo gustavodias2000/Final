@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 
-import { getAudit, reviewAuditItem, uploadAudit } from "../api/audits";
+import { getAudit, getLatestAudit, reviewAuditItem, uploadAudit } from "../api/audits";
 import type { AuditItem, AuditItemStatus, AuditStatus, AuditUploadResponse, ReviewDecision } from "../api/contracts";
 import { useAuth } from "../auth/AuthContext";
 
@@ -29,6 +29,7 @@ type Filter = "all" | "review" | "approved" | "rejected" | "no_suggestion";
 const UNDO_MS = 5000;
 const POLL_MS = 1500;
 const MAX_POLL_FAILURES = 5;
+const LAST_AUDIT_ID_KEY = "last_audit_id";
 
 const NCM_GROUPS = [4, 2, 2];
 const CEST_GROUPS = [2, 3, 2];
@@ -123,6 +124,27 @@ export default function Dashboard() {
   const auditRef = useRef(audit);
   const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision }>());
   auditRef.current = audit;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function restoreLatestAudit() {
+      const storedAuditId = localStorage.getItem(LAST_AUDIT_ID_KEY);
+      try {
+        const restored = storedAuditId ? await getAudit(storedAuditId) : await getLatestAudit();
+        if (cancelled) return;
+        setAudit(restored);
+        setShowUpload(false);
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          localStorage.removeItem(LAST_AUDIT_ID_KEY);
+        }
+      }
+    }
+
+    void restoreLatestAudit();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!audit || audit.status !== "processing") return;
@@ -224,7 +246,9 @@ export default function Dashboard() {
     setUploading(true);
     setError(null);
     try {
-      setAudit(await uploadAudit(file));
+      const created = await uploadAudit(file);
+      localStorage.setItem(LAST_AUDIT_ID_KEY, created.audit_id);
+      setAudit(created);
       setFile(null);
       setShowUpload(false);
       setPollError(null);
@@ -232,7 +256,10 @@ export default function Dashboard() {
       setQuery("");
       setOpenId(null);
     } catch (error) {
-      setError(uploadErrorMessage(error));
+      const timedOut = axios.isAxiosError(error) && error.code === "ECONNABORTED";
+      setError(timedOut
+        ? "O envio demorou mais que o esperado. Recarregue a página para retomar a última auditoria antes de tentar novamente."
+        : uploadErrorMessage(error));
     } finally {
       setUploading(false);
     }

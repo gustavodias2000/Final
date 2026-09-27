@@ -50,6 +50,23 @@ def upload(
     return _to_response(audit, [])
 
 
+@router.get("/latest", response_model=AuditUploadResponse)
+def get_latest_audit(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AuditUploadResponse:
+    """Recupera a auditoria mais recente do tenant para retomar o dashboard."""
+    audit = (
+        db.query(Audit)
+        .filter(Audit.tenant_id == current_user.tenant_id)
+        .order_by(Audit.created_at.desc())
+        .first()
+    )
+    if audit is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhuma auditoria encontrada.")
+    return _to_response(audit, audit.items)
+
+
 def _persist_input_items(db: Session, audit_id: UUID, products: tuple) -> None:
     """Persiste uploads grandes em lotes, compatíveis com poolers PostgreSQL."""
     mappings = [

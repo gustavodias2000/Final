@@ -143,6 +143,14 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(read_response.status_code, 404)
         self.assertEqual(review_response.status_code, 404)
 
+    def test_latest_audit_is_limited_to_the_authenticated_tenant(self) -> None:
+        own_response = self.client.get("/api/v1/audits/latest", headers=self._headers_for("auditor-a"))
+        other_response = self.client.get("/api/v1/audits/latest", headers=self._headers_for("auditor-b"))
+
+        self.assertEqual(own_response.status_code, 200)
+        self.assertEqual(own_response.json()["audit_id"], str(self.audit_a.id))
+        self.assertEqual(other_response.status_code, 404)
+
     def test_review_is_persisted_and_cannot_be_repeated(self) -> None:
         headers = self._headers_for("auditor-a")
         endpoint = f"/api/v1/audits/{self.audit_a.id}/items/{self.item_a.id}/review"
