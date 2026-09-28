@@ -190,6 +190,7 @@ export default function Dashboard() {
   const [query, setQuery] = useState("");
   const [pending, setPending] = useState<Record<string, ReviewDecision>>({});
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
+  const [bulkDecision, setBulkDecision] = useState<ReviewDecision | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(true);
   const [announcement, setAnnouncement] = useState("");
@@ -272,6 +273,11 @@ export default function Dashboard() {
       no_suggestion: items.filter((item) => item.status === "no_suggestion").length,
     } satisfies Record<Filter, number>;
   }, [audit]);
+
+  const reviewableItems = useMemo(
+    () => (audit?.data ?? []).filter(needsReview),
+    [audit],
+  );
 
   const filteredItems = useMemo(() => {
     if (!audit) return [];
@@ -413,6 +419,48 @@ export default function Dashboard() {
     });
     setAnnouncement(`Decisão sobre ${item.descricao} desfeita.`);
     requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`${rowSelector(item.id)} .review-btn.approve`)?.focus());
+  }
+
+  async function decideAll(decision: ReviewDecision) {
+    const current = auditRef.current;
+    if (!current || !reviewableItems.length || bulkDecision) return;
+    if (hasPending) {
+      setError("Aguarde a conclusão das decisões individuais ou use Desfazer antes de decidir em lote.");
+      return;
+    }
+    const action = decision === "approved" ? "aprovar" : "rejeitar";
+    const count = reviewableItems.length;
+    if (!window.confirm(`Deseja ${action} os ${count} ${count === 1 ? "item pendente" : "itens pendentes"}? Esta ação não poderá ser desfeita.`)) return;
+
+    setBulkDecision(decision);
+    setError(null);
+    setBusyIds(new Set(reviewableItems.map((item) => item.id)));
+    let completed = 0;
+    let failed = 0;
+    for (const item of reviewableItems) {
+      try {
+        const updated = await reviewAuditItem(current.audit_id, item.id, decision);
+        completed += 1;
+        setAudit((value) => value ? {
+          ...value,
+          data: value.data.map((candidate) => candidate.id === item.id ? updated : candidate),
+        } : value);
+      } catch {
+        failed += 1;
+      } finally {
+        setBusyIds((value) => {
+          const next = new Set(value);
+          next.delete(item.id);
+          return next;
+        });
+      }
+    }
+    setBulkDecision(null);
+    if (failed) {
+      setError(`${completed} itens foram ${decision === "approved" ? "aprovados" : "rejeitados"}; ${failed} não puderam ser atualizados. Recarregue a página antes de tentar novamente.`);
+      return;
+    }
+    setAnnouncement(`${completed} ${completed === 1 ? "item foi" : "itens foram"} ${decision === "approved" ? "aprovados" : "rejeitados"}.`);
   }
 
   function downloadCsv(columns: string[], rows: string[][], filename: string) {
@@ -619,6 +667,14 @@ export default function Dashboard() {
                   <span className="sr-only">Buscar produto</span>
                   <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto ou NCM" />
                 </label>
+                <div className="bulk-review-actions" aria-label="Decisões em lote">
+                  <button className="review-btn approve" onClick={() => void decideAll("approved")} disabled={!reviewableItems.length || Boolean(bulkDecision) || hasPending} title="Aprovar todos os itens aguardando revisão">
+                    {bulkDecision === "approved" ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />} Aprovar todos ({reviewableItems.length})
+                  </button>
+                  <button className="review-btn reject" onClick={() => void decideAll("rejected")} disabled={!reviewableItems.length || Boolean(bulkDecision) || hasPending} title="Rejeitar todos os itens aguardando revisão">
+                    {bulkDecision === "rejected" ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />} Rejeitar todos ({reviewableItems.length})
+                  </button>
+                </div>
                 <button className="button button-ghost" onClick={() => void exportStyledDetailedResults()} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Detalhada</button>
                 <button className="button button-ghost" onClick={() => void exportStyledSummaryResults()} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Resumida</button>
               </div>

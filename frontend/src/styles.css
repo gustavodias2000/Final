@@ -312,6 +312,7 @@ tr.row-pending-rejected, tr.row-pending-rejected:hover { background: color-mix(i
 
 .actions-cell { width: 1%; white-space: nowrap; text-align: right; }
 .review-actions { display: inline-flex; gap: 6px; }
+.bulk-review-actions { display: inline-flex; gap: 6px; }
 .review-btn { height: 30px; padding: 0 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 560; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease, transform 120ms ease; }
 .review-btn:active:not(:disabled) { transform: scale(0.97); }
 .review-btn:disabled { opacity: 0.5; }
@@ -426,7 +427,7 @@ tr.row-pending-rejected, tr.row-pending-rejected:hover { background: color-mix(i
   .summary-tile:nth-child(2n) { border-left: 0; }
   .results-head { display: grid; }
   .results-tools { display: grid; grid-template-columns: 1fr; }
-  .results-tools .button { justify-self: start; }
+  .results-tools .button, .bulk-review-actions { justify-self: start; }
   .run-file { flex-wrap: wrap; }
   .run-file strong { white-space: normal; overflow-wrap: anywhere; }
   .search-field { width: 100%; }
