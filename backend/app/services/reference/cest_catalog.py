@@ -8,15 +8,26 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
-from typing import Iterable, Mapping
+from typing import Any, Iterable, Mapping, Protocol
 
 import pandas as pd
+import requests
 
 from app.services.ncm_matcher import normalize_text
 
 
 class CestCatalogError(RuntimeError):
     """O arquivo de referência CEST não possui registros utilizáveis."""
+
+
+class JsonHttpResponse(Protocol):
+    def raise_for_status(self) -> None: ...
+
+    def json(self) -> Any: ...
+
+
+class JsonHttpClient(Protocol):
+    def get(self, url: str, *, timeout: float, headers: dict[str, str]) -> JsonHttpResponse: ...
 
 
 @dataclass(frozen=True)
@@ -86,6 +97,30 @@ def load_catalog_file(path: str | Path, source_url: str | None = None) -> CestCa
     else:
         raise CestCatalogError("Use um arquivo CEST .csv ou .xlsx.")
     return build_catalog(frame.to_dict(orient="records"), source_url or file_path.resolve().as_uri())
+
+
+def load_catalog_url(
+    source_url: str,
+    timeout_seconds: float,
+    http_client: JsonHttpClient | None = None,
+) -> CestCatalog:
+    """Baixa e valida um catálogo JSON antes de qualquer gravação no banco."""
+    client = http_client or requests.Session()
+    try:
+        response = client.get(
+            source_url,
+            timeout=timeout_seconds,
+            headers={"Accept": "application/json", "User-Agent": "AuditorNCM/1.0"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise CestCatalogError("Não foi possível obter o catálogo CEST remoto.") from exc
+
+    rows = payload.get("dados") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        raise CestCatalogError("Formato inesperado do catálogo CEST remoto.")
+    return build_catalog(rows, source_url)
 
 
 def _get_value(row: Mapping[str, object], *names: str) -> object | None:

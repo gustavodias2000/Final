@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.db.models import CestReference, CestReferenceVersion
 from app.db.session import SessionLocal, configure_database
-from app.services.reference.cest_catalog import CestCatalog, load_catalog_file
+from app.services.reference.cest_catalog import CestCatalog, load_catalog_file, load_catalog_url
 
 
 @dataclass(frozen=True)
@@ -58,12 +58,24 @@ def persist_catalog(catalog: CestCatalog, session_factory: sessionmaker = Sessio
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Importa uma referência CEST .csv ou .xlsx.")
-    parser.add_argument("file", type=Path, help="Arquivo com as colunas ncm e cest; descricao é opcional.")
+    parser = argparse.ArgumentParser(description="Importa uma referência CEST de arquivo ou JSON remoto.")
+    parser.add_argument(
+        "file",
+        nargs="?",
+        type=Path,
+        help="Arquivo .csv ou .xlsx com as colunas ncm e cest; descricao é opcional.",
+    )
+    parser.add_argument("--url", help="URL de um catálogo JSON com pares NCM/CEST.")
     parser.add_argument("--source-url", help="URL ou identificação oficial da fonte do arquivo.")
     parser.add_argument("--dry-run", action="store_true", help="Valida sem gravar no banco.")
     arguments = parser.parse_args()
-    catalog = load_catalog_file(arguments.file, arguments.source_url)
+    if bool(arguments.file) == bool(arguments.url):
+        parser.error("Informe exatamente um arquivo ou --url.")
+
+    if arguments.url:
+        catalog = load_catalog_url(arguments.url, settings.external_request_timeout_seconds)
+    else:
+        catalog = load_catalog_file(arguments.file, arguments.source_url)
     if arguments.dry_run:
         print(f"Referência CEST validada: {catalog.version} ({len(catalog.entries)} registros).")
         return

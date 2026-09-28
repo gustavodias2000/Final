@@ -37,6 +37,30 @@ Uma nova importacao com o mesmo conteudo nao duplica registros. Ao auditar, um
 unico CEST para a NCM pode ser sugerido para revisao humana; duas ou mais
 opcoes permanecem sem escolha automatica.
 
+## Atualizacao rastreavel pela fonte de download
+
+Para a carga inicial e atualizacoes periodicas, o projeto tambem aceita o JSON
+de mapeamento NCM x CEST publicado pela Tabelas Fiscais. A URL consultada fica
+registrada junto com o hash SHA-256 da versao importada. Primeiro execute
+somente a validacao:
+
+```powershell
+python -m app.services.reference.sync_cest --url "https://tabelasfiscais.com.br/public/downloads/cest_ncm.json" --dry-run
+```
+
+Confirme que a contagem e plausivel e, entao, execute o mesmo comando sem
+`--dry-run`:
+
+```powershell
+python -m app.services.reference.sync_cest --url "https://tabelasfiscais.com.br/public/downloads/cest_ncm.json"
+```
+
+Use o terminal que ja possui as variaveis do backend configuradas. Nao cole
+nem registre `DATABASE_URL`, `SECRET_KEY` ou senhas. Ao terminar a importacao,
+reinicie o worker local para que novas auditorias usem a ultima versao do
+catalogo. Auditorias ja concluidas preservam a evidencia da versao anterior e
+nao sao alteradas.
+
 ## Multiplas opcoes para a mesma NCM
 
 Quando uma regra NCM exata tiver mais de um CEST, o worker compara a descricao

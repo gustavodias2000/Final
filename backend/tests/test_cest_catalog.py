@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.db.models import CestReference, CestReferenceVersion
 from app.db.session import Base
-from app.services.reference.cest_catalog import CestCatalog, CestCatalogEntry, build_catalog
+from app.services.reference.cest_catalog import CestCatalog, CestCatalogEntry, build_catalog, load_catalog_url
 from app.services.reference.sync_cest import persist_catalog
 
 
@@ -49,6 +49,35 @@ class CestCatalogTests(unittest.TestCase):
 
         self.assertEqual(catalog.entries[0].ncm_codigo, "2710193")
         self.assertEqual(catalog.entries[0].cest_codigo, "06.005.00")
+
+    def test_load_catalog_url_accepts_tabelas_fiscais_download_format(self) -> None:
+        class FakeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, object]:
+                return {
+                    "gerado_em": "2026-09-24T01:32:12Z",
+                    "total": 2,
+                    "dados": [
+                        {"ncm": "9608.40.00", "cest": "19.030.00"},
+                        {"ncm": "2202.10.00", "cest": "03.007.00"},
+                    ],
+                }
+
+        class FakeClient:
+            def get(self, url: str, *, timeout: float, headers: dict[str, str]) -> FakeResponse:
+                self.url = url
+                self.timeout = timeout
+                self.headers = headers
+                return FakeResponse()
+
+        client = FakeClient()
+        catalog = load_catalog_url("https://example.test/cest_ncm.json", 12.0, client)
+
+        self.assertEqual(len(catalog.entries), 2)
+        self.assertEqual(catalog.entries[0].cest_codigo, "03.007.00")
+        self.assertEqual(client.headers["Accept"], "application/json")
 
     def test_persists_immutable_catalog_once(self) -> None:
         catalog = CestCatalog(
