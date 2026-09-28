@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
+import { strToU8, zipSync } from "fflate";
 import {
   AlertTriangle,
   ArrowRight,
@@ -463,6 +464,70 @@ export default function Dashboard() {
     downloadCsv(columns, rows, `auditoria-${audit.audit_id}-resumida.csv`);
   }
 
+  function escapeXml(value: string) {
+    return value.replace(/[<>&"']/g, (character) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" })[character] ?? character);
+  }
+
+  function excelColumn(column: number) {
+    let result = "";
+    let value = column;
+    while (value > 0) {
+      value -= 1;
+      result = String.fromCharCode(65 + (value % 26)) + result;
+      value = Math.floor(value / 26);
+    }
+    return result;
+  }
+
+  function inlineTextCell(reference: string, value: string, style: number) {
+    return `<c r="${reference}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`;
+  }
+
+  function buildStyledWorkbook(title: string, subtitle: string, columns: string[], rows: string[][]) {
+    const lastColumn = excelColumn(columns.length);
+    const dateLine = `Auditoria: ${audit?.audit_id ?? ""} | Gerado em: ${new Date().toLocaleString("pt-BR")}`;
+    const widthFor = (header: string) => header === "Descrição" || header === "Motivo" || header === "Evidência CEST" ? 38
+      : header === "Tentativas de consulta" || header === "Fonte CEST" || header === "Fonte NCM" ? 28
+        : header === "codigo_produto" || header === "Código" ? 18 : 17;
+    const rowXml = (rowNumber: number, values: string[], style: number) => `<row r="${rowNumber}" ht="20" customHeight="1">${values.map((value, index) => inlineTextCell(`${excelColumn(index + 1)}${rowNumber}`, value, index === 1 || index >= 9 ? style + 2 : style)).join("")}</row>`;
+    const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="5" topLeftCell="A6" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${columns.map((header, index) => `<col min="${index + 1}" max="${index + 1}" width="${widthFor(header)}" customWidth="1"/>`).join("")}</cols><sheetData>
+<row r="1" ht="31" customHeight="1">${inlineTextCell("A1", title, 1)}</row><row r="2" ht="20" customHeight="1">${inlineTextCell("A2", subtitle, 2)}</row><row r="3" ht="18" customHeight="1">${inlineTextCell("A3", dateLine, 3)}</row><row r="5" ht="25" customHeight="1">${columns.map((header, index) => inlineTextCell(`${excelColumn(index + 1)}5`, header, 4)).join("")}</row>${rows.map((row, index) => rowXml(index + 6, row, index % 2 === 0 ? 5 : 6)).join("")}</sheetData><autoFilter ref="A5:${lastColumn}${Math.max(5, rows.length + 5)}"/><mergeCells count="3"><mergeCell ref="A1:${lastColumn}1"/><mergeCell ref="A2:${lastColumn}2"/><mergeCell ref="A3:${lastColumn}3"/></mergeCells><pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`;
+    const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="4"><font><sz val="10"/><name val="Aptos"/></font><font><b/><sz val="18"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/></font><font><sz val="10"/><color rgb="FF49657B"/><name val="Aptos"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF123B5D"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0E7192"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF2F7F9"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FFD8E1E6"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="9"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="49" fontId="1" fillId="2" borderId="0" applyFont="1" applyFill="1"/><xf numFmtId="49" fontId="2" fillId="0" borderId="0" applyFont="1"/><xf numFmtId="49" fontId="2" fillId="0" borderId="0" applyFont="1"/><xf numFmtId="49" fontId="3" fillId="3" borderId="1" applyFont="1" applyFill="1" applyBorder="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf><xf numFmtId="49" fontId="0" fillId="0" borderId="1" applyBorder="1"><alignment vertical="center"/></xf><xf numFmtId="49" fontId="0" fillId="4" borderId="1" applyFill="1" applyBorder="1"><alignment vertical="center"/></xf><xf numFmtId="49" fontId="0" fillId="0" borderId="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="49" fontId="0" fillId="4" borderId="1" applyFill="1" applyBorder="1"><alignment vertical="center" wrapText="1"/></xf></cellXfs></styleSheet>`;
+    const files = {
+      "[Content_Types].xml": strToU8("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/></Types>"),
+      "_rels/.rels": strToU8("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>"),
+      "xl/workbook.xml": strToU8("<?xml version=\"1.0\" encoding=\"UTF-8\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Relatorio\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"),
+      "xl/_rels/workbook.xml.rels": strToU8("<?xml version=\"1.0\" encoding=\"UTF-8\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>"),
+      "xl/worksheets/sheet1.xml": strToU8(sheetXml),
+      "xl/styles.xml": strToU8(stylesXml),
+    };
+    return zipSync(files, { level: 6 });
+  }
+
+  function downloadWorkbook(content: Uint8Array, filename: string) {
+    const url = URL.createObjectURL(new Blob([content], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function exportStyledDetailedResults() {
+    if (!audit?.data.length) return;
+    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
+    const rows = audit.data.map((item) => [item.codigo_produto, item.descricao, item.ncm_atual ?? "", item.ncm_sugerido ?? "", ncmResult(item).label, item.cest_atual ?? "", item.cest_sugerido ?? "", cestResult(item).label, item.score.toString(), statusMeta[item.status].label, item.motivo, item.cest_status ?? "", item.cest_source_url ?? "", item.cest_evidence ?? "", attemptSummary(item), item.fonte_referencia ?? "", item.versao_referencia ?? ""]);
+    downloadWorkbook(buildStyledWorkbook("Relatório detalhado de auditoria", "Todas as classificações, evidências e decisões da auditoria.", columns, rows), `auditoria-${audit.audit_id}-detalhada.xlsx`);
+  }
+
+  function exportStyledSummaryResults() {
+    if (!audit?.data.length) return;
+    const columns = ["codigo_produto", "descricao", "NCM", "CEST"];
+    const rows = audit.data.filter(hasSuggestedClassificationChange).map((item) => [item.codigo_produto, item.descricao, proposedCode(item.ncm_atual, item.ncm_sugerido), proposedCode(item.cest_atual, item.cest_sugerido)]);
+    downloadWorkbook(buildStyledWorkbook("Relatório resumido de alterações", "Somente produtos com alteração sugerida de NCM ou CEST.", columns, rows), `auditoria-${audit.audit_id}-resumida.xlsx`);
+  }
+
   return (
     <>
       <header className="topbar">
@@ -554,8 +619,8 @@ export default function Dashboard() {
                   <span className="sr-only">Buscar produto</span>
                   <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto ou NCM" />
                 </label>
-                <button className="button button-ghost" onClick={exportDetailedResults} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Detalhada</button>
-                <button className="button button-ghost" onClick={exportSummaryResults} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Resumida</button>
+                <button className="button button-ghost" onClick={() => void exportStyledDetailedResults()} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Detalhada</button>
+                <button className="button button-ghost" onClick={() => void exportStyledSummaryResults()} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Resumida</button>
               </div>
             </div>
 
