@@ -397,6 +397,82 @@ class AuditWorkerTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_real_sample_cest_cases_are_never_silently_accepted(self) -> None:
+        version = CestReferenceVersion(
+            id=uuid4(),
+            source_url="https://example.test/catalogo-cest",
+            version="sha256:real-cest-cases",
+            fetched_at=datetime.now(timezone.utc),
+        )
+        rules = {
+            "96084000": (("19.030.00", "Outras canetas - sortidos de canetas"),),
+            "22021000": (
+                ("03.007.00", None),
+                ("03.010.00", None),
+                ("03.010.01", None),
+                ("03.010.02", None),
+                ("03.011.00", None),
+                ("03.011.01", None),
+                ("17.110.00", None),
+                ("17.111.00", None),
+            ),
+        }
+        results = [
+            {
+                "codigo_produto": "3154148500599",
+                "descricao": "LAPIS GRAF MPD HB",
+                "ncm_atual": "96091000",
+                "ncm_sugerido": None,
+                "cest_atual": "14.001.00",
+                "cest_sugerido": None,
+                "status": "no_suggestion",
+                "motivo": "NCM sem divergencia.",
+            },
+            {
+                "codigo_produto": "70330424043",
+                "descricao": "LAPISEIRA BIC SHIMMERS 0,5",
+                "ncm_atual": "96084000",
+                "ncm_sugerido": None,
+                "cest_atual": "99.999.99",
+                "cest_sugerido": None,
+                "status": "no_suggestion",
+                "motivo": "NCM sem divergencia.",
+            },
+            {
+                "codigo_produto": "7891360582083",
+                "descricao": "LAPISEIRA FABER-CASTELL POLY TEEN 0,5",
+                "ncm_atual": "96084000",
+                "ncm_sugerido": None,
+                "cest_atual": "19.030.00",
+                "cest_sugerido": None,
+                "status": "no_suggestion",
+                "motivo": "NCM sem divergencia.",
+            },
+            {
+                "codigo_produto": "7897184000215",
+                "descricao": "ZAP COLA MINEIRO 2L",
+                "ncm_atual": "22021000",
+                "ncm_sugerido": None,
+                "cest_atual": "14.001.00",
+                "cest_sugerido": None,
+                "status": "no_suggestion",
+                "motivo": "NCM sem divergencia.",
+            },
+        ]
+
+        AuditWorker._enrich_cest_catalog_results(results, rules, version)
+
+        pencil, bic, faber_castell, zap = results
+        self.assertEqual(pencil["cest_status"], "catalog_no_cest_for_ncm")
+        self.assertEqual(pencil["status"], "pending_review")
+        self.assertEqual(bic["cest_status"], "catalog_current_mismatch")
+        self.assertEqual(bic["cest_sugerido"], "19.030.00")
+        self.assertEqual(faber_castell["cest_status"], "catalog_current_match")
+        self.assertIsNone(faber_castell["cest_sugerido"])
+        self.assertEqual(zap["cest_status"], "catalog_current_mismatch")
+        self.assertIsNone(zap["cest_sugerido"])
+        self.assertEqual(zap["status"], "pending_review")
+
     def test_worker_records_prefix_cest_rule_without_automatic_suggestion(self) -> None:
         audit = self._create_audit()
         db = self.Session()

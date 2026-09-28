@@ -247,6 +247,7 @@ class AuditWorker:
             if result.get("cest_status") not in {
                 None,
                 "catalog_not_found",
+                "catalog_no_cest_for_ncm",
                 "catalog_current_mismatch",
                 "catalog_prefix_current_mismatch",
             }:
@@ -273,6 +274,7 @@ class AuditWorker:
         current_cest = result.get("cest_atual")
         local_suggestion = result.get("cest_sugerido")
         is_local_mismatch = previous_status in {
+            "catalog_no_cest_for_ncm",
             "catalog_current_mismatch",
             "catalog_prefix_current_mismatch",
         }
@@ -289,6 +291,7 @@ class AuditWorker:
             external_codes = attempt.cest_codes
             external_conflicts = (
                 current_cest in external_codes
+                or (previous_status == "catalog_no_cest_for_ncm" and bool(external_codes))
                 or (local_suggestion is not None and local_suggestion not in external_codes)
             )
             result["cest_source_url"] = attempt.source_url
@@ -386,9 +389,17 @@ class AuditWorker:
                 )
             )
             if not candidates:
-                result["cest_status"] = "catalog_not_found"
+                current_cest = result.get("cest_atual")
+                result["cest_status"] = "catalog_no_cest_for_ncm" if current_cest else "catalog_not_found"
                 result["cest_source_url"] = version.source_url
                 result["cest_evidence"] = f"Catalogo CEST {version.version}: nenhum CEST para NCM {ncm}."
+                if current_cest:
+                    result["motivo"] = (
+                        f"{result['motivo']} CEST atual {current_cest} foi informado, mas nao ha CEST "
+                        "elegivel para o NCM consultado; requer revisao humana."
+                    )
+                    if result["status"] == "no_suggestion":
+                        result["status"] = "pending_review"
                 continue
 
             is_prefix_match = longest_prefix_length < len(ncm)

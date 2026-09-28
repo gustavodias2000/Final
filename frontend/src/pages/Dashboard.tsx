@@ -40,6 +40,7 @@ const CEST_ALERT_STATUSES = new Set([
   "catalog_prefix_current_mismatch",
   "catalog_external_confirmed_mismatch",
   "catalog_external_conflict",
+  "catalog_no_cest_for_ncm",
   "catalog_multiple",
   "catalog_not_found",
 ]);
@@ -143,6 +144,8 @@ function cestResult(item: AuditItem): ClassificationResult {
       return { label: "Incompatível confirmado", tone: "danger" };
     case "catalog_external_conflict":
       return { label: "Fontes divergentes: revisar", tone: "danger" };
+    case "catalog_no_cest_for_ncm":
+      return { label: "Sem CEST elegível: revisar", tone: "danger" };
     case "catalog_not_found":
       return { label: "Não verificado", tone: "warning" };
     case "catalog_multiple":
@@ -701,6 +704,7 @@ function formatCestStatus(status: string) {
     catalog_prefix_current_mismatch: "CEST atual incompatível com regra parcial; revisar",
     catalog_external_confirmed_mismatch: "CEST incompatível confirmado por fonte externa",
     catalog_external_conflict: "Catálogo local e fonte externa divergem; revisão necessária",
+    catalog_no_cest_for_ncm: "CEST informado, mas sem CEST elegível para o NCM",
     catalog_ranked: "Selecionado por ranking de descrição",
     catalog_multiple: "Múltiplas opções para revisão",
     catalog_prefix_match: "Correspondência parcial; sem sugestão automática",
