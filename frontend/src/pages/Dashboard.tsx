@@ -104,6 +104,20 @@ function hasCestAlert(item: AuditItem) {
   return CEST_ALERT_STATUSES.has(item.cest_status ?? "");
 }
 
+// A exportacao resumida representa a classificacao proposta. Ela entra quando
+// ao menos um dos codigos mudou; uma sugestao pendente continua no relatorio
+// para que a pessoa responsavel possa revisa-la fora do sistema, se necessario.
+function hasSuggestedClassificationChange(item: AuditItem) {
+  return (
+    Boolean(item.ncm_sugerido && item.ncm_sugerido !== item.ncm_atual)
+    || Boolean(item.cest_sugerido && item.cest_sugerido !== item.cest_atual)
+  );
+}
+
+function proposedCode(current: string | null, suggested: string | null) {
+  return suggested && suggested !== current ? suggested : current ?? "";
+}
+
 function matchesFilter(item: AuditItem, filter: Filter) {
   if (filter === "all") return true;
   if (filter === "review") return needsReview(item);
@@ -400,7 +414,17 @@ export default function Dashboard() {
     requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`${rowSelector(item.id)} .review-btn.approve`)?.focus());
   }
 
-  function exportResults() {
+  function downloadCsv(columns: string[], rows: string[][], filename: string) {
+    const csv = [columns, ...rows].map((row) => row.map(csvValue).join(";")).join("\n");
+    const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function exportDetailedResults() {
     if (!audit?.data.length) return;
     const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
     const rows = audit.data.map((item) => [
@@ -422,13 +446,21 @@ export default function Dashboard() {
       item.fonte_referencia ?? "",
       item.versao_referencia ?? "",
     ]);
-    const csv = [columns, ...rows].map((row) => row.map(csvValue).join(";")).join("\n");
-    const url = URL.createObjectURL(new Blob(["﻿", csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `auditoria-${audit.audit_id}.csv`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    downloadCsv(columns, rows, `auditoria-${audit.audit_id}.csv`);
+  }
+
+  function exportSummaryResults() {
+    if (!audit?.data.length) return;
+    const columns = ["codigo_produto", "descricao", "NCM", "CEST"];
+    const rows = audit.data
+      .filter(hasSuggestedClassificationChange)
+      .map((item) => [
+        item.codigo_produto,
+        item.descricao,
+        proposedCode(item.ncm_atual, item.ncm_sugerido),
+        proposedCode(item.cest_atual, item.cest_sugerido),
+      ]);
+    downloadCsv(columns, rows, `auditoria-${audit.audit_id}-resumida.csv`);
   }
 
   return (
@@ -522,7 +554,8 @@ export default function Dashboard() {
                   <span className="sr-only">Buscar produto</span>
                   <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto ou NCM" />
                 </label>
-                <button className="button button-ghost" onClick={exportResults} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Exportar CSV</button>
+                <button className="button button-ghost" onClick={exportDetailedResults} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Detalhada</button>
+                <button className="button button-ghost" onClick={exportSummaryResults} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Resumida</button>
               </div>
             </div>
 
