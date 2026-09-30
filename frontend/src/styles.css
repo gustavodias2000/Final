@@ -133,6 +133,7 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
 .page-head h1 { font-size: clamp(26px, 3.2vw, 34px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.12; text-wrap: balance; }
 .page-head p { max-width: 58ch; margin-top: 8px; color: var(--ink-2); font-size: 14.5px; }
+.audit-page-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 
 @keyframes reveal { from { opacity: 0; transform: translateY(8px); } }
 
@@ -147,6 +148,7 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
+.upload-file-area { min-width: 0; display: grid; gap: 8px; }
 .dropzone {
   position: relative;
   min-height: 76px;
@@ -170,6 +172,9 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 .dropzone-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; font-weight: 580; }
 .dropzone-copy small { color: var(--ink-3); font-size: 12.5px; }
 .dropzone-hint { margin-left: auto; color: var(--accent); font-size: 12.5px; font-weight: 560; white-space: nowrap; }
+.template-download { width: fit-content; padding: 2px 4px; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); background: transparent; border: 0; border-radius: 4px; font-size: 12.5px; font-weight: 560; }
+.template-download:hover { text-decoration: underline; }
+.template-download:focus-visible { outline-offset: 2px; }
 .upload-panel .button-primary { min-width: 176px; height: 100%; }
 
 .how-it-works {
@@ -416,6 +421,7 @@ tr.row-pending-rejected, tr.row-pending-rejected:hover { background: color-mix(i
   .trust-note { display: none; }
   .workspace { padding: 28px 16px 56px; }
   .page-head { display: grid; }
+  .audit-page-actions { justify-content: flex-start; }
   .upload-panel { grid-template-columns: 1fr; }
   .upload-panel .button-primary { width: 100%; min-height: 44px; }
   .dropzone-hint { display: none; }

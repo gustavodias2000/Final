@@ -310,6 +310,29 @@ export default function Dashboard() {
     setFile(candidate);
   }
 
+  function clearConference() {
+    if (!audit) return;
+    if (hasPending) {
+      setError("Aguarde as decisões individuais terminarem ou use Desfazer antes de limpar a conferência.");
+      return;
+    }
+    const processingWarning = audit.status === "processing"
+      ? "A análise continuará no servidor e no worker. "
+      : "";
+    if (!window.confirm(`${processingWarning}Limpar esta conferência somente desta tela? O histórico da auditoria não será excluído.`)) return;
+
+    localStorage.removeItem(LAST_AUDIT_ID_KEY);
+    setAudit(null);
+    setFile(null);
+    setShowUpload(true);
+    setFilter("all");
+    setQuery("");
+    setOpenId(null);
+    setPollError(null);
+    setError(null);
+    setAnnouncement("Conferência removida da tela. O histórico foi preservado.");
+  }
+
   async function flushPending() {
     const queued = [...timers.current.values()];
     await Promise.all(queued.map(({ timer, item, decision }) => {
@@ -562,6 +585,20 @@ export default function Dashboard() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  function downloadUploadTemplate() {
+    const columns = ["codigo_produto", "descricao", "ncm_atual", "cest_atual"];
+    const rows = [["EXEMPLO-001", "Produto de exemplo", "22030000", "03.001.00"]];
+    downloadWorkbook(
+      buildStyledWorkbook(
+        "Modelo de importação para auditoria",
+        "Preencha uma linha por produto e apague a linha de exemplo antes de enviar.",
+        columns,
+        rows,
+      ),
+      "modelo-auditoria-ncm-cest.xlsx",
+    );
+  }
+
   function exportStyledDetailedResults() {
     if (!audit?.data.length) return;
     const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
@@ -598,26 +635,36 @@ export default function Dashboard() {
               ? "Aprove apenas o que tiver evidência suficiente. Cada decisão fica registrada."
               : "Envie o cadastro de produtos, acompanhe a análise e decida item a item."}</p>
           </div>
-          {audit ? <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setFile(null); }} aria-expanded={showUpload}>
-            {showUpload ? <><X size={15} aria-hidden="true" /> Cancelar</> : <><FileUp size={15} aria-hidden="true" /> Nova auditoria</>}
-          </button> : null}
+          {audit ? <div className="audit-page-actions">
+            <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setFile(null); }} aria-expanded={showUpload}>
+              {showUpload ? <><X size={15} aria-hidden="true" /> Cancelar</> : <><FileUp size={15} aria-hidden="true" /> Nova auditoria</>}
+            </button>
+            <button className="button button-ghost" onClick={clearConference} disabled={hasPending} title="Remove esta auditoria somente desta tela; o histórico será preservado">
+              <X size={15} aria-hidden="true" /> Limpar conferência
+            </button>
+          </div> : null}
         </div>
 
         {!audit || showUpload ? <section className="upload-panel" aria-label="Envio de planilha">
-          <label
-            className={`dropzone ${dragging ? "dropzone-dragging" : file ? "dropzone-ready" : ""}`}
-            onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
-            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
-            onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files?.[0]); }}
-          >
-            <input type="file" accept=".xlsx" onChange={(event) => chooseFile(event.target.files?.[0])} />
-            <span className="dropzone-icon" aria-hidden="true">{file ? <FileSpreadsheet size={20} /> : <FileUp size={20} />}</span>
-            <span className="dropzone-copy">
-              <strong>{file ? file.name : dragging ? "Solte a planilha aqui" : "Arraste a planilha ou clique para escolher"}</strong>
-              <small>{file ? `${formatBytes(file.size)} · pronta para auditar` : "Arquivo .xlsx com código, descrição, NCM e CEST"}</small>
-            </span>
-            <span className="dropzone-hint" aria-hidden="true">{file ? "Trocar arquivo" : "Procurar"}</span>
-          </label>
+          <div className="upload-file-area">
+            <label
+              className={`dropzone ${dragging ? "dropzone-dragging" : file ? "dropzone-ready" : ""}`}
+              onDragOver={(event) => { event.preventDefault(); setDragging(true); }}
+              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
+              onDrop={(event) => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files?.[0]); }}
+            >
+              <input type="file" accept=".xlsx" onChange={(event) => chooseFile(event.target.files?.[0])} />
+              <span className="dropzone-icon" aria-hidden="true">{file ? <FileSpreadsheet size={20} /> : <FileUp size={20} />}</span>
+              <span className="dropzone-copy">
+                <strong>{file ? file.name : dragging ? "Solte a planilha aqui" : "Arraste a planilha ou clique para escolher"}</strong>
+                <small>{file ? `${formatBytes(file.size)} · pronta para auditar` : "Arquivo .xlsx com código, descrição, NCM e CEST"}</small>
+              </span>
+              <span className="dropzone-hint" aria-hidden="true">{file ? "Trocar arquivo" : "Procurar"}</span>
+            </label>
+            <button type="button" className="template-download" onClick={downloadUploadTemplate}>
+              <Download size={14} aria-hidden="true" /> Baixar modelo de planilha
+            </button>
+          </div>
           <button className="button button-primary button-lg" disabled={!file || uploading} onClick={handleUpload}>
             {uploading ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : <Upload size={17} aria-hidden="true" />}
             {uploading ? "Enviando" : "Iniciar auditoria"}
