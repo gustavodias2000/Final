@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { strToU8, zipSync } from "fflate";
 import {
@@ -7,6 +7,7 @@ import {
   Check,
   ChevronRight,
   Download,
+  Eraser,
   FileSpreadsheet,
   FileUp,
   ListChecks,
@@ -23,6 +24,8 @@ import { getAudit, getLatestAudit, reviewAuditItem, uploadAudit } from "../api/a
 import type { AuditItem, AuditItemStatus, AuditStatus, AuditUploadResponse, CestCandidate, ReviewDecision } from "../api/contracts";
 import { useAuth } from "../auth/AuthContext";
 import { ThemeToggle } from "../theme";
+import { useConfirm } from "../components/ConfirmDialog";
+import { MenuButton } from "../components/MenuButton";
 
 type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_suggestion";
 
@@ -96,6 +99,26 @@ const tiles: { key: Filter; label: string; tone: string }[] = [
   { key: "rejected", label: "Rejeitados", tone: "danger" },
   { key: "no_suggestion", label: "Sem sugestão", tone: "neutral" },
 ];
+
+const REASON_MAX = 90;
+
+// Resumo do motivo para a linha: só a primeira frase (até ". " ou ";") e no máximo
+// ~90 caracteres, cortando numa palavra. O texto completo fica em "Ver evidências".
+function reasonSummary(reason: string): { text: string; shortened: boolean } {
+  const full = reason.trim().replace(/\s+/g, " ");
+  const end = full.search(/\.\s|;/);
+  let text = (end >= 0 ? full.slice(0, end) : full).replace(/[\s.;,:]+$/, "");
+  let shortened = end >= 0 && /[^\s.;]/.test(full.slice(end + 1));
+  if (text.length > REASON_MAX) {
+    const cut = text.slice(0, REASON_MAX);
+    const space = cut.lastIndexOf(" ");
+    text = `${(space > REASON_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s.;,:]+$/, "")}…`;
+    shortened = true;
+  } else if (text && !/[!?…]$/.test(text)) {
+    text = `${text}.`;
+  }
+  return { text, shortened };
+}
 
 function needsReview(item: AuditItem) {
   return item.status === "suggested" || item.status === "pending_review";
@@ -224,6 +247,7 @@ export default function Dashboard() {
   const auditRef = useRef(audit);
   const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision; cest?: string }>());
   auditRef.current = audit;
+  const [confirm, confirmDialog] = useConfirm();
 
   useEffect(() => {
     let cancelled = false;
@@ -301,6 +325,21 @@ export default function Dashboard() {
     } satisfies Record<Filter, number>;
   }, [audit]);
 
+  // A lista abre em "Aguardando revisão" quando há pendências; senão, em todos os produtos.
+  // Vale uma vez por auditoria, quando a análise termina, e nunca depois de a pessoa
+  // escolher um filtro. Layout effect: a troca acontece antes da primeira pintura da lista.
+  const filterSettledFor = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!audit || audit.status === "processing" || filterSettledFor.current === audit.audit_id) return;
+    filterSettledFor.current = audit.audit_id;
+    setFilter(counts.review > 0 ? "review" : "all");
+  }, [audit, counts.review]);
+
+  function chooseFilter(next: Filter) {
+    if (audit) filterSettledFor.current = audit.audit_id;
+    setFilter(next);
+  }
+
   const reviewableItems = useMemo(
     () => (audit?.data ?? []).filter(needsReview),
     [audit],
@@ -337,7 +376,7 @@ export default function Dashboard() {
     setFile(candidate);
   }
 
-  function clearConference() {
+  async function clearConference() {
     if (!audit) return;
     if (hasPending) {
       setError("Aguarde as decisões individuais terminarem ou use Desfazer antes de limpar a conferência.");
@@ -346,7 +385,7 @@ export default function Dashboard() {
     const processingWarning = audit.status === "processing"
       ? "A análise continuará no servidor e no worker. "
       : "";
-    if (!window.confirm(`${processingWarning}Limpar esta conferência somente desta tela? O histórico da auditoria não será excluído.`)) return;
+    if (!(await confirm({ title: "Limpar esta conferência somente desta tela?", message: `${processingWarning}O histórico da auditoria não será excluído.`, confirmLabel: "Limpar conferência", tone: "danger" }))) return;
 
     localStorage.removeItem(LAST_AUDIT_ID_KEY);
     setAudit(null);
@@ -370,7 +409,7 @@ export default function Dashboard() {
 
   async function handleUpload() {
     if (!file) return;
-    if (audit && counts.review > 0 && !window.confirm(`Esta auditoria ainda tem ${counts.review} ${counts.review === 1 ? "item aguardando" : "itens aguardando"} revisão. Iniciar uma nova mesmo assim?`)) return;
+    if (audit && counts.review > 0 && !(await confirm({ title: "Iniciar uma nova auditoria mesmo assim?", message: `Esta auditoria ainda tem ${counts.review} ${counts.review === 1 ? "item aguardando" : "itens aguardando"} revisão.`, confirmLabel: "Iniciar nova auditoria" }))) return;
     await flushPending();
     setUploading(true);
     setError(null);
@@ -506,7 +545,12 @@ export default function Dashboard() {
     const skippedNote = skipped
       ? ` ${skipped} ${skipped === 1 ? "item ficará" : "itens ficarão"} de fora porque ${skipped === 1 ? "exige" : "exigem"} a escolha de um CEST.`
       : "";
-    if (!window.confirm(`Deseja ${action} os ${count} ${count === 1 ? "item pendente" : "itens pendentes"}?${skippedNote} Esta ação não poderá ser desfeita.`)) return;
+    if (!(await confirm({
+      title: `Deseja ${action} ${count === 1 ? "1 item pendente" : `os ${count} itens pendentes`}?`,
+      message: `${skippedNote.trim()} Esta ação não poderá ser desfeita.`.trim(),
+      confirmLabel: `${decision === "approved" ? "Aprovar" : "Rejeitar"} ${count} ${count === 1 ? "item" : "itens"}`,
+      tone: "danger",
+    }))) return;
 
     setBulkDecision(decision);
     setError(null);
@@ -692,9 +736,6 @@ export default function Dashboard() {
             <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setFile(null); }} aria-expanded={showUpload}>
               {showUpload ? <><X size={15} aria-hidden="true" /> Cancelar</> : <><FileUp size={15} aria-hidden="true" /> Nova auditoria</>}
             </button>
-            <button className="button button-ghost" onClick={clearConference} disabled={hasPending} title="Remove esta auditoria somente desta tela; o histórico será preservado">
-              <X size={15} aria-hidden="true" /> Limpar conferência
-            </button>
           </div> : null}
         </div>
 
@@ -746,13 +787,24 @@ export default function Dashboard() {
           </section>
 
           <section className="summary" aria-label="Filtrar por estado">
-            {tiles.map((tile) => {
-              const value = analysing ? null : counts[tile.key];
-              return <button key={tile.key} type="button" className={`summary-tile ${tile.tone}`} data-zero={value === 0 || undefined} aria-pressed={filter === tile.key} disabled={analysing} onClick={() => setFilter(tile.key)}>
-                <span>{tile.label}</span>
-                <strong>{value ?? <span className="skeleton skeleton-num" aria-label="Em análise" />}</strong>
-              </button>;
-            })}
+            <button type="button" className={`summary-hero ${analysing ? "" : counts.review ? "warning" : "success"}`} aria-pressed={filter === "review"} disabled={analysing} onClick={() => chooseFilter("review")}>
+              <span className="summary-hero-label">Aguardando revisão</span>
+              <strong>{analysing ? <span className="skeleton skeleton-num" aria-label="Em análise" /> : counts.review}</strong>
+              <span className="summary-hero-note">{analysing
+                ? "Disponível ao fim da análise"
+                : counts.review
+                  ? `${counts.review === 1 ? "item precisa" : "itens precisam"} da sua decisão`
+                  : <><Check size={15} aria-hidden="true" /> Nada pendente</>}</span>
+            </button>
+            <div className="summary-chips" role="group" aria-label="Outros estados">
+              {tiles.filter((tile) => tile.key !== "review").map((tile) => {
+                const value = analysing ? null : counts[tile.key];
+                return <button key={tile.key} type="button" className={`summary-chip ${tile.tone}`} data-zero={value === 0 || undefined} aria-pressed={filter === tile.key} disabled={analysing} onClick={() => chooseFilter(tile.key)}>
+                  <span>{tile.label}</span>
+                  <strong>{value ?? <span className="skeleton skeleton-num" aria-label="Em análise" />}</strong>
+                </button>;
+              })}
+            </div>
           </section>
 
           <section className="results" aria-labelledby="results-title">
@@ -767,16 +819,26 @@ export default function Dashboard() {
                   <span className="sr-only">Buscar produto</span>
                   <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto ou NCM" />
                 </label>
-                <div className="bulk-review-actions" aria-label="Decisões em lote">
-                  <button className="review-btn approve" onClick={() => void decideAll("approved")} disabled={!reviewableItems.length || Boolean(bulkDecision) || hasPending} title="Aprovar todos os itens aguardando revisão">
-                    {bulkDecision === "approved" ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />} Aprovar todos ({reviewableItems.length})
-                  </button>
-                  <button className="review-btn reject" onClick={() => void decideAll("rejected")} disabled={!reviewableItems.length || Boolean(bulkDecision) || hasPending} title="Rejeitar todos os itens aguardando revisão">
-                    {bulkDecision === "rejected" ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <X size={14} aria-hidden="true" />} Rejeitar todos ({reviewableItems.length})
-                  </button>
-                </div>
-                <button className="button button-ghost" onClick={() => void exportStyledDetailedResults()} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Detalhada</button>
-                <button className="button button-ghost" onClick={() => void exportStyledSummaryResults()} disabled={!audit.data.length}><Download size={15} aria-hidden="true" /> Resumida</button>
+                <MenuButton
+                  label="Ações"
+                  icon={<ListChecks size={15} aria-hidden="true" />}
+                  busy={Boolean(bulkDecision)}
+                  items={[
+                    { key: "approve-all", label: `Aprovar todos os pendentes (${reviewableItems.length})`, icon: <Check size={15} className="menu-icon-approve" />, disabled: !reviewableItems.length || Boolean(bulkDecision) || hasPending, onSelect: () => void decideAll("approved") },
+                    { key: "reject-all", label: `Rejeitar todos os pendentes (${reviewableItems.length})`, icon: <X size={15} className="menu-icon-reject" />, disabled: !reviewableItems.length || Boolean(bulkDecision) || hasPending, onSelect: () => void decideAll("rejected") },
+                    { type: "separator", key: "separator" },
+                    { key: "clear", label: "Limpar conferência", description: "Remove só desta tela; o histórico é preservado.", icon: <Eraser size={15} />, tone: "danger", disabled: hasPending || Boolean(bulkDecision), onSelect: () => void clearConference() },
+                  ]}
+                />
+                <MenuButton
+                  label="Exportar"
+                  icon={<Download size={15} aria-hidden="true" />}
+                  disabled={!audit.data.length}
+                  items={[
+                    { key: "detailed", label: "Planilha detalhada (.xlsx)", description: "Todos os itens, com evidências e decisões.", icon: <FileSpreadsheet size={15} />, onSelect: exportStyledDetailedResults },
+                    { key: "summary", label: "Planilha resumida (.xlsx)", description: "Só os itens com NCM ou CEST alterado.", icon: <FileSpreadsheet size={15} />, onSelect: exportStyledSummaryResults },
+                  ]}
+                />
               </div>
             </div>
 
@@ -805,7 +867,7 @@ export default function Dashboard() {
                 icon={<Search size={20} />}
                 title={filter === "review" && !query ? "Nada aguardando revisão" : "Nenhum item encontrado"}
                 text={filter === "review" && !query ? "Todas as recomendações desta auditoria já foram decididas." : "Ajuste a busca ou escolha outro estado no resumo acima."}
-                action={<button className="button button-ghost" onClick={() => { setQuery(""); setFilter("all"); }}>Ver todos os produtos</button>}
+                action={<button className="button button-ghost" onClick={() => { setQuery(""); chooseFilter("all"); }}>Ver todos os produtos</button>}
               /> : null}
             </div> : null}
           </section>
@@ -815,6 +877,7 @@ export default function Dashboard() {
           <li><Download size={18} aria-hidden="true" /><strong>Exporte as decisões</strong><span>Baixe o CSV com o que foi aprovado ou rejeitado.</span></li>
         </ol>}
       </main>
+      {confirmDialog}
     </>
   );
 }
@@ -843,7 +906,8 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
   const cestBadge: ClassificationResult = item.cest_escolhido
     ? { label: "Escolhido na revisão", tone: "success" }
     : cestClassification;
-  const hasEvidence = Boolean(item.fonte_referencia || item.cest_status || item.cest_evidence || item.cest_source_url || item.reference_attempts?.length);
+  const reason = reasonSummary(item.motivo);
+  const hasEvidence = reason.shortened || Boolean(item.fonte_referencia || item.cest_status || item.cest_evidence || item.cest_source_url || item.reference_attempts?.length);
   const detailId = `evidence-${item.id}`;
   const rowClass = ["row", open && "row-open", decided && "row-decided", pending && `row-pending row-pending-${pending}`].filter(Boolean).join(" ");
 
@@ -863,7 +927,7 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
           <CodeChange label="NCM" current={item.ncm_atual} suggested={item.ncm_sugerido} groups={NCM_GROUPS} empty="Sem NCM informado" />
           <span className={`badge ${ncmClassification.tone}`}>NCM: {ncmClassification.label}</span>
         </div>
-        <span className="reason">{item.motivo}</span>
+        {reason.text ? <span className="reason">{reason.text}</span> : null}
       </td>
       <td className="cell-cest" data-label="CEST">
         <div className="classification">
@@ -903,7 +967,7 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
       </td>
     </tr>
     {open && hasEvidence ? <tr className="evidence-row" id={detailId}>
-      <td colSpan={6}><EvidencePanel item={item} /></td>
+      <td colSpan={6}><EvidencePanel item={item} fullReason={reason.shortened} /></td>
     </tr> : null}
   </Fragment>;
 }
@@ -1001,9 +1065,10 @@ function Confidence({ score }: { score: number }) {
   </span>;
 }
 
-function EvidencePanel({ item }: { item: AuditItem }) {
+function EvidencePanel({ item, fullReason }: { item: AuditItem; fullReason: boolean }) {
   const attempts = item.reference_attempts ?? [];
   return <dl className="evidence">
+    {fullReason ? <div className="evidence-reason"><dt>Motivo</dt><dd>{item.motivo}</dd></div> : null}
     {item.fonte_referencia ? <div><dt>Referência NCM</dt><dd>{item.fonte_referencia}{item.versao_referencia ? ` (${item.versao_referencia})` : ""}</dd></div> : null}
     {item.cest_status ? <div><dt>Status CEST</dt><dd>{formatCestStatus(item.cest_status)}</dd></div> : null}
     {item.cest_evidence ? <div><dt>Justificativa CEST</dt><dd>{item.cest_evidence}</dd></div> : null}
