@@ -34,7 +34,12 @@ type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_su
 // A API recusa (409) uma segunda revisão do mesmo item; a decisão fica retida
 // no navegador por alguns segundos para que um clique errado possa ser desfeito.
 const UNDO_MS = 5000;
-const POLL_MS = 1500;
+// O worker informa o avanço a cada 100 produtos; consultar mais que isso não mostra nada novo.
+const POLL_MS = 5000;
+const APP_TITLE = "Auditor NCM/CEST";
+// Janela usada para estimar o tempo restante pela velocidade recente do worker.
+const ETA_WINDOW_MS = 90_000;
+const ETA_MIN_SPAN_MS = 8_000;
 // A tabela desenha os itens aos poucos: planilhas grandes travariam a página de uma vez.
 const PAGE_SIZE = 50;
 const MAX_POLL_FAILURES = 5;
@@ -392,13 +397,88 @@ export default function Dashboard() {
     setQueuedSince((current) => current?.auditId === audit.audit_id ? current : { auditId: audit.audit_id, at: Date.now() });
   }, [audit?.audit_id, queued]);
 
-  // Relógio de segundos só enquanto há uma espera para mostrar.
+  // Análise de NCM terminou (100%), mas o worker ainda confere CEST e fontes externas.
+  const finalizing = audit?.status === "processing" && audit.progresso.total > 0 && audit.progresso.processados >= audit.progresso.total;
+  const running = audit?.status === "processing" && !queued && !finalizing;
+
+  // Cada resposta do servidor marca a hora da última atualização e alimenta a estimativa de tempo.
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const progressSamples = useRef<{ auditId: string; samples: { at: number; done: number }[] }>({ auditId: "", samples: [] });
   useEffect(() => {
-    if (!uploading && !queued) return;
+    if (!audit || audit.status !== "processing") return;
+    const at = Date.now();
+    setLastUpdatedAt(at);
+    const tracker = progressSamples.current;
+    if (tracker.auditId !== audit.audit_id) {
+      tracker.auditId = audit.audit_id;
+      tracker.samples = [];
+    }
+    const done = audit.progresso.processados;
+    const last = tracker.samples[tracker.samples.length - 1];
+    if (!last || done !== last.done) tracker.samples.push({ at, done });
+    tracker.samples = tracker.samples.filter((sample) => at - sample.at <= ETA_WINDOW_MS);
+  }, [audit]);
+
+  function remainingLabel(): string | null {
+    if (!audit || !running) return null;
+    const { samples } = progressSamples.current;
+    if (progressSamples.current.auditId !== audit.audit_id || samples.length < 2) return null;
+    const first = samples[0];
+    const last = samples[samples.length - 1];
+    const span = last.at - first.at;
+    if (span < ETA_MIN_SPAN_MS || last.done <= first.done) return null;
+    const perSecond = (last.done - first.done) / (span / 1000);
+    const seconds = (audit.progresso.total - last.done) / perSecond;
+    if (seconds < 60) return "menos de 1 min restante";
+    const minutes = Math.round(seconds / 60);
+    return `cerca de ${minutes} min restantes`;
+  }
+
+  // Título da aba: mostra o andamento e avisa quando a análise termina com a aba em segundo plano.
+  const titleStatus = useRef<{ auditId: string; status: string } | null>(null);
+  useEffect(() => {
+    const previous = titleStatus.current;
+    titleStatus.current = audit ? { auditId: audit.audit_id, status: audit.status } : null;
+    if (!audit) {
+      document.title = APP_TITLE;
+      return;
+    }
+    if (audit.status === "processing") {
+      document.title = queued ? `Na fila · ${APP_TITLE}` : finalizing ? `Finalizando · ${APP_TITLE}` : `(${progress}%) ${APP_TITLE}`;
+      return;
+    }
+    const justFinished = previous?.auditId === audit.audit_id && previous.status === "processing";
+    if (!justFinished) {
+      document.title = APP_TITLE;
+      return;
+    }
+    const done = audit.status === "completed" ? "Análise concluída" : "Análise interrompida";
+    setAnnouncement(`${done}: ${audit.arquivo}.`);
+    if (!document.hidden) {
+      document.title = APP_TITLE;
+      return;
+    }
+    document.title = `${audit.status === "completed" ? "✓" : "!"} ${done} · ${APP_TITLE}`;
+    const restore = () => {
+      if (!document.hidden) {
+        document.title = APP_TITLE;
+        document.removeEventListener("visibilitychange", restore);
+      }
+    };
+    document.addEventListener("visibilitychange", restore);
+    return () => document.removeEventListener("visibilitychange", restore);
+  }, [audit?.audit_id, audit?.status, queued, finalizing, progress]);
+
+  // Relógio de segundos só enquanto há uma espera ou uma análise para mostrar.
+  const ticking = uploading || audit?.status === "processing";
+  useEffect(() => {
+    if (!ticking) return;
     setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
-  }, [uploading, queued]);
+  }, [ticking]);
+  const updatedSeconds = lastUpdatedAt === null ? 0 : Math.max(0, Math.floor((now - lastUpdatedAt) / 1000));
+  const remaining = remainingLabel();
   const uploadSeconds = uploadStartedAt === null ? 0 : Math.max(0, Math.floor((now - uploadStartedAt) / 1000));
   const queuedSeconds = queuedSince === null ? 0 : Math.max(0, Math.floor((now - queuedSince.at) / 1000));
 
@@ -860,17 +940,30 @@ export default function Dashboard() {
               <strong title={audit.arquivo}>{audit.arquivo}</strong>
               <span className={`badge badge-${audit.status}`}>
                 {audit.status === "processing" ? <LoaderCircle className="spin" size={12} aria-hidden="true" /> : null}
-                {queued ? "Na fila" : runMeta[audit.status]}
+                {queued ? "Na fila" : finalizing ? "Finalizando" : runMeta[audit.status]}
               </span>
             </div>
             <div className="run-progress">
-              <div className="run-progress-meta"><span>{audit.progresso.processados} de {audit.progresso.total} produtos analisados</span><strong>{progress}%</strong></div>
+              <div className="run-progress-meta">
+                <span>{running
+                  ? `Analisando NCM: ${audit.progresso.processados.toLocaleString("pt-BR")} de ${audit.progresso.total.toLocaleString("pt-BR")} produtos`
+                  : `${audit.progresso.processados.toLocaleString("pt-BR")} de ${audit.progresso.total.toLocaleString("pt-BR")} produtos analisados`}</span>
+                <strong>{progress}%</strong>
+              </div>
               <div className="meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label="Progresso da análise"><span style={{ transform: `scaleX(${progress / 100})` }} /></div>
             </div>
             {queued ? <p className={`run-note${queuedSeconds >= 30 ? " run-note-warn" : ""}`} role="status">
               {queuedSeconds >= 30
                 ? <><AlertTriangle size={14} aria-hidden="true" /> A análise ainda não começou. Confira se o worker de análise está ligado (iniciar-worker.cmd no computador que faz a análise).</>
                 : "Planilha recebida. Aguardando o worker começar a análise."}
+            </p> : null}
+            {finalizing ? <p className="run-note" role="status">
+              <LoaderCircle className="spin" size={14} aria-hidden="true" /> Análise de NCM concluída. Conferindo CEST e fontes externas; pode levar alguns minutos.
+            </p> : null}
+            {audit.status === "processing" && lastUpdatedAt !== null ? <p className="run-live">
+              {remaining ? <span className="run-eta">{remaining}</span> : null}
+              <span className="run-live-dot" aria-hidden="true" />
+              <span aria-hidden="true">{updatedSeconds < 2 ? "Atualizado agora" : `Atualizado há ${updatedSeconds} s`}</span>
             </p> : null}
           </section>
 

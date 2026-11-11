@@ -182,6 +182,10 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 .run-note { grid-column: 1 / -1; margin: 2px 0 0; display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12.5px; }
 .run-note-warn { color: var(--amber); font-weight: 560; }
 .run-note svg { flex: none; }
+.run-eta { margin-right: 8px; color: var(--ink-2); font-weight: 560; }
+.run-live { grid-column: 1 / -1; margin: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.run-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: live-pulse 2s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: 0.35; } }
 
 .how-it-works {
   margin: 28px 0 0;
