@@ -585,18 +585,13 @@ export default function Dashboard() {
     window.setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 
+  // O modelo é um arquivo estático com o cabeçalho na linha 1, que é onde a API
+  // procura as colunas. Uma planilha gerada com título acima do cabeçalho seria recusada.
   function downloadUploadTemplate() {
-    const columns = ["codigo_produto", "descricao", "ncm_atual", "cest_atual"];
-    const rows = [["EXEMPLO-001", "Produto de exemplo", "22030000", "03.001.00"]];
-    downloadWorkbook(
-      buildStyledWorkbook(
-        "Modelo de importação para auditoria",
-        "Preencha uma linha por produto e apague a linha de exemplo antes de enviar.",
-        columns,
-        rows,
-      ),
-      "modelo-auditoria-ncm-cest.xlsx",
-    );
+    const link = document.createElement("a");
+    link.href = `${import.meta.env.BASE_URL}modelo-auditoria-ncm-cest.xlsx`;
+    link.download = "modelo-auditoria-ncm-cest.xlsx";
+    link.click();
   }
 
   function exportStyledDetailedResults() {
