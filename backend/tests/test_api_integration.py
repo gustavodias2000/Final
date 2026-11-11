@@ -351,6 +351,7 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         payload = response.json()
         self.assertEqual(payload["status"], "processing")
+        self.assertIsNone(payload["iniciada_em"], "a auditoria fica na fila até um worker pegá-la")
         db = self.Session()
         try:
             persisted_audit = db.get(Audit, UUID(payload["audit_id"]))

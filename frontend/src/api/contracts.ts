@@ -61,6 +61,8 @@ export interface AuditUploadResponse {
   resumo: AuditSummary;
   data: AuditItem[];
   progresso: AuditProgress;
+  // Quando um worker começou a analisar; nulo enquanto a auditoria espera na fila.
+  iniciada_em?: string | null;
   errors: string[];
 }
 

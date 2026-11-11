@@ -199,6 +199,7 @@ def _to_response(audit: Audit, items: list[AuditItem]) -> AuditUploadResponse:
         ),
         data=responses,
         progresso=AuditProgress(processados=audit.processados, total=audit.total_produtos),
+        iniciada_em=audit.processing_started_at,
         errors=audit.errors or [],
     )
 

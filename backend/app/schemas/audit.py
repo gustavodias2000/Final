@@ -89,6 +89,10 @@ class AuditUploadResponse(BaseModel):
     resumo: AuditSummary
     data: list[AuditItemResponse]
     progresso: AuditProgress
+    iniciada_em: datetime | None = Field(
+        default=None,
+        description="Quando um worker começou a analisar; vazio enquanto a auditoria espera na fila.",
+    )
     errors: list[str] = []
 
 

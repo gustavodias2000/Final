@@ -237,6 +237,10 @@ export default function Dashboard() {
   const [dragging, setDragging] = useState(false);
   const [audit, setAudit] = useState<AuditUploadResponse | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadStartedAt, setUploadStartedAt] = useState<number | null>(null);
+  const [queuedSince, setQueuedSince] = useState<{ auditId: string; at: number } | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
@@ -377,6 +381,26 @@ export default function Dashboard() {
     ? Math.round((audit.progresso.processados / audit.progresso.total) * 100)
     : 0;
   const analysing = audit?.status === "processing" && !audit.data.length;
+  // Na fila: enviada, mas nenhum worker começou a analisar ainda.
+  const queued = audit?.status === "processing" && !audit.iniciada_em && audit.progresso.processados === 0;
+
+  useEffect(() => {
+    if (!audit || !queued) {
+      setQueuedSince(null);
+      return;
+    }
+    setQueuedSince((current) => current?.auditId === audit.audit_id ? current : { auditId: audit.audit_id, at: Date.now() });
+  }, [audit?.audit_id, queued]);
+
+  // Relógio de segundos só enquanto há uma espera para mostrar.
+  useEffect(() => {
+    if (!uploading && !queued) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [uploading, queued]);
+  const uploadSeconds = uploadStartedAt === null ? 0 : Math.max(0, Math.floor((now - uploadStartedAt) / 1000));
+  const queuedSeconds = queuedSince === null ? 0 : Math.max(0, Math.floor((now - queuedSince.at) / 1000));
 
   function chooseFile(candidate: File | null | undefined) {
     if (!candidate) return;
@@ -424,9 +448,11 @@ export default function Dashboard() {
     if (audit && counts.review > 0 && !(await confirm({ title: "Iniciar uma nova auditoria mesmo assim?", message: `Esta auditoria ainda tem ${counts.review} ${counts.review === 1 ? "item aguardando" : "itens aguardando"} revisão.`, confirmLabel: "Iniciar nova auditoria" }))) return;
     await flushPending();
     setUploading(true);
+    setUploadPercent(0);
+    setUploadStartedAt(Date.now());
     setError(null);
     try {
-      const created = await uploadAudit(file);
+      const created = await uploadAudit(file, setUploadPercent);
       localStorage.setItem(LAST_AUDIT_ID_KEY, created.audit_id);
       setAudit(created);
       setFile(null);
@@ -442,6 +468,7 @@ export default function Dashboard() {
         : uploadErrorMessage(error));
     } finally {
       setUploading(false);
+      setUploadStartedAt(null);
     }
   }
 
@@ -810,8 +837,15 @@ export default function Dashboard() {
           </div>
           <button className="button button-primary button-lg" disabled={!file || uploading} onClick={handleUpload}>
             {uploading ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : <Upload size={17} aria-hidden="true" />}
-            {uploading ? "Enviando" : "Iniciar auditoria"}
+            {!uploading ? "Iniciar auditoria" : uploadPercent < 100 ? `Enviando ${uploadPercent}%` : "Lendo planilha"}
           </button>
+          {uploading ? <p className="upload-status" role="status">
+            {uploadPercent < 100
+              ? `Enviando o arquivo para o servidor: ${uploadPercent}%.`
+              : "Arquivo enviado. O servidor está lendo e salvando a planilha."}
+            <span className="upload-status-timer" aria-hidden="true"> {uploadSeconds} s</span>
+            {uploadSeconds >= 15 ? <span className="upload-status-slow"> Se o servidor estava em repouso, pode levar até 1 minuto. Se der erro, a tela avisa.</span> : null}
+          </p> : null}
         </section> : null}
 
         {error ? <div className="notice notice-error" role="alert"><AlertTriangle size={16} aria-hidden="true" /><span>{error}</span></div> : null}
@@ -826,13 +860,18 @@ export default function Dashboard() {
               <strong title={audit.arquivo}>{audit.arquivo}</strong>
               <span className={`badge badge-${audit.status}`}>
                 {audit.status === "processing" ? <LoaderCircle className="spin" size={12} aria-hidden="true" /> : null}
-                {runMeta[audit.status]}
+                {queued ? "Na fila" : runMeta[audit.status]}
               </span>
             </div>
             <div className="run-progress">
               <div className="run-progress-meta"><span>{audit.progresso.processados} de {audit.progresso.total} produtos analisados</span><strong>{progress}%</strong></div>
               <div className="meter" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label="Progresso da análise"><span style={{ transform: `scaleX(${progress / 100})` }} /></div>
             </div>
+            {queued ? <p className={`run-note${queuedSeconds >= 30 ? " run-note-warn" : ""}`} role="status">
+              {queuedSeconds >= 30
+                ? <><AlertTriangle size={14} aria-hidden="true" /> A análise ainda não começou. Confira se o worker de análise está ligado (iniciar-worker.cmd no computador que faz a análise).</>
+                : "Planilha recebida. Aguardando o worker começar a análise."}
+            </p> : null}
           </section>
 
           <section className="summary" aria-label="Filtrar por estado">

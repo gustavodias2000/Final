@@ -1,13 +1,18 @@
 import api from "./client";
 import type { AuditHistoryEntry, AuditItem, AuditUploadResponse, ReviewDecision } from "./contracts";
 
-export async function uploadAudit(file: File): Promise<AuditUploadResponse> {
+export async function uploadAudit(file: File, onProgress?: (percent: number) => void): Promise<AuditUploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
   const { data } = await api.post<AuditUploadResponse>(
     "/api/v1/audits/upload",
     formData,
+    {
+      onUploadProgress: (event) => {
+        if (onProgress && event.total) onProgress(Math.min(100, Math.round((event.loaded / event.total) * 100)));
+      },
+    },
   );
 
   return data;

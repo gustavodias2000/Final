@@ -176,6 +176,12 @@ html { scrollbar-color: color-mix(in srgb, var(--ink) 22%, transparent) transpar
 .template-download:hover { text-decoration: underline; }
 .template-download:focus-visible { outline-offset: 2px; }
 .upload-panel .button-primary { min-width: 176px; height: 100%; }
+.upload-status { grid-column: 1 / -1; margin: 0; padding: 2px 4px; color: var(--ink-2); font-size: 12.5px; }
+.upload-status-timer { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.upload-status-slow { color: var(--ink-3); }
+.run-note { grid-column: 1 / -1; margin: 2px 0 0; display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 12.5px; }
+.run-note-warn { color: var(--amber); font-weight: 560; }
+.run-note svg { flex: none; }
 
 .how-it-works {
   margin: 28px 0 0;
