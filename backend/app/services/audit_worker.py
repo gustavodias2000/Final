@@ -405,6 +405,9 @@ class AuditWorker:
             is_prefix_match = longest_prefix_length < len(ncm)
             current_cest = result.get("cest_atual")
             ranked_candidates = AuditWorker._rank_cest_candidates(result.get("descricao"), matched_rules)
+            result["cest_candidates"] = AuditWorker._describe_cest_candidates(
+                candidates, matched_rules, ranked_candidates
+            )
             result["cest_source_url"] = version.source_url
             ranking_evidence = (
                 " Ranking por descrição: "
@@ -461,6 +464,38 @@ class AuditWorker:
                         f"{result['motivo']} CEST selecionado entre opções da mesma NCM por similaridade "
                         "da descrição; requer revisão humana."
                     )
+
+            # Várias opções sem vencedora: a escolha cabe à pessoa revisora, então o item
+            # entra na fila de revisão em vez de terminar como "sem sugestão".
+            if not current_cest and len(candidates) > 1 and not result.get("cest_sugerido"):
+                if result["status"] == "no_suggestion":
+                    result["status"] = "pending_review"
+                result["motivo"] = (
+                    f"{result['motivo']} Há {len(candidates)} opções de CEST para o NCM; "
+                    "escolha uma na revisão."
+                )
+
+    @staticmethod
+    def _describe_cest_candidates(
+        candidates: tuple[str, ...],
+        matched_rules: list[tuple[str, str | None]],
+        ranked_candidates: list[tuple[str, float]],
+    ) -> list[dict[str, object]]:
+        """Lista as opções com a descrição do catálogo e a nota, da mais provável para a menos."""
+        descriptions: dict[str, str] = {}
+        for cest, description in matched_rules:
+            if description and cest not in descriptions:
+                descriptions[cest] = description
+        scores = dict(ranked_candidates)
+        ordered = sorted(candidates, key=lambda cest: (-scores.get(cest, -1.0), cest))
+        return [
+            {
+                "cest": cest,
+                "descricao": descriptions.get(cest),
+                "score": round(scores[cest], 1) if cest in scores else None,
+            }
+            for cest in ordered
+        ]
 
     @staticmethod
     def _rank_cest_candidates(
@@ -538,6 +573,7 @@ class AuditWorker:
                     "cest_source_url": result.get("cest_source_url"),
                     "cest_evidence": result.get("cest_evidence"),
                     "reference_attempts": result.get("reference_attempts", []),
+                    "cest_candidates": result.get("cest_candidates", []),
                 }
                 for result in results
             ]

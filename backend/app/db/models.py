@@ -149,6 +149,10 @@ class AuditItem(Base):
     cest_source_url = Column(Text, nullable=True)
     cest_evidence = Column(Text, nullable=True)
     reference_attempts = Column(JSON, nullable=False, default=list)
+    # Opções de CEST elegíveis para o NCM, com descrição do catálogo e nota de similaridade.
+    cest_candidates = Column(JSON, nullable=False, default=list)
+    # CEST escolhido pela pessoa revisora entre as opções, no momento da aprovação.
+    cest_escolhido = Column(String(10), nullable=True)
     reviewed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

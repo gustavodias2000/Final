@@ -29,6 +29,14 @@ class ReviewDecision(str, Enum):
     REJECTED = "rejected"
 
 
+class CestCandidate(BaseModel):
+    """Uma opção de CEST elegível para o NCM, segundo o catálogo versionado."""
+
+    cest: str
+    descricao: str | None = None
+    score: float | None = Field(default=None, ge=0, le=100, description="Similaridade com a descrição do produto")
+
+
 class AuditItemResponse(BaseModel):
     """Uma recomendação para um produto, ainda sujeita a revisão humana."""
 
@@ -48,10 +56,16 @@ class AuditItemResponse(BaseModel):
     cest_source_url: str | None = None
     cest_evidence: str | None = None
     reference_attempts: list[dict[str, object]] = Field(default_factory=list)
+    cest_candidates: list[CestCandidate] = Field(default_factory=list)
+    cest_escolhido: str | None = Field(default=None, description="CEST escolhido na revisão entre as opções")
 
 
 class AuditItemReviewRequest(BaseModel):
     decision: ReviewDecision
+    cest_escolhido: str | None = Field(
+        default=None,
+        description="Somente na aprovação: um dos CESTs listados em cest_candidates.",
+    )
 
 
 class AuditSummary(BaseModel):

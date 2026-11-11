@@ -16,6 +16,12 @@ export interface ReferenceAttempt {
   detail: string | null;
 }
 
+export interface CestCandidate {
+  cest: string;
+  descricao: string | null;
+  score: number | null;
+}
+
 export interface AuditItem {
   id: string;
   codigo_produto: string;
@@ -33,6 +39,8 @@ export interface AuditItem {
   cest_source_url: string | null;
   cest_evidence: string | null;
   reference_attempts: ReferenceAttempt[];
+  cest_candidates: CestCandidate[];
+  cest_escolhido: string | null;
 }
 
 export interface AuditSummary {

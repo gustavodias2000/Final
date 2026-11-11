@@ -545,6 +545,56 @@ class AuditWorkerTests(unittest.TestCase):
             self.assertEqual(item.cest_sugerido, "01.001.00")
             self.assertEqual(item.cest_status, "catalog_ranked")
             self.assertIn("Ranking por descrição", item.cest_evidence)
+            self.assertEqual([option["cest"] for option in item.cest_candidates], ["01.001.00", "01.002.00"])
+            self.assertEqual(item.cest_candidates[0]["descricao"], "Cavalos reprodutores de raça pura")
+            self.assertEqual(item.cest_candidates[0]["score"], 100.0)
+        finally:
+            db.close()
+
+    def test_worker_queues_ambiguous_cest_options_for_human_choice(self) -> None:
+        audit = self._create_audit(ncm_atual="01012100")
+        db = self.Session()
+        try:
+            catalog = CestReferenceVersion(
+                id=uuid4(),
+                source_url="https://example.test/catalogo-cest",
+                version="sha256:ambiguous-cest",
+                fetched_at=datetime.now(timezone.utc),
+            )
+            db.add_all([
+                catalog,
+                CestReference(
+                    id=uuid4(),
+                    reference_version_id=catalog.id,
+                    ncm_codigo="01012100",
+                    cest_codigo="28.033.00",
+                    descricao="Garrafas e frascos para venda porta a porta",
+                ),
+                CestReference(
+                    id=uuid4(),
+                    reference_version_id=catalog.id,
+                    ncm_codigo="01012100",
+                    cest_codigo="20.063.00",
+                    descricao="Embalagens plásticas para produtos de higiene",
+                ),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        worker = AuditWorker(self.Session, worker_id="worker-ambiguo", lease_seconds=60, max_attempts=3)
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertIsNone(item.cest_sugerido)
+            self.assertEqual(item.cest_status, "catalog_multiple")
+            self.assertEqual(item.status, "pending_review")
+            self.assertIn("Há 2 opções de CEST", item.motivo)
+            self.assertEqual({option["cest"] for option in item.cest_candidates}, {"20.063.00", "28.033.00"})
+            self.assertTrue(all(option["descricao"] for option in item.cest_candidates))
+            self.assertIsNone(item.cest_escolhido)
         finally:
             db.close()
 

@@ -151,6 +151,61 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(own_response.json()["audit_id"], str(self.audit_a.id))
         self.assertEqual(other_response.status_code, 404)
 
+    def _set_cest_candidates(self) -> str:
+        db = self.Session()
+        try:
+            item = db.get(AuditItem, self.item_a.id)
+            item.status = "pending_review"
+            item.cest_status = "catalog_multiple"
+            item.cest_candidates = [
+                {"cest": "20.063.00", "descricao": "Opção A", "score": 40.0},
+                {"cest": "28.033.00", "descricao": "Opção B", "score": 35.0},
+            ]
+            db.commit()
+        finally:
+            db.close()
+        return f"/api/v1/audits/{self.audit_a.id}/items/{self.item_a.id}/review"
+
+    def test_approval_records_the_chosen_cest_among_eligible_options(self) -> None:
+        endpoint = self._set_cest_candidates()
+        headers = self._headers_for("auditor-a")
+
+        listed = self.client.get(f"/api/v1/audits/{self.audit_a.id}", headers=headers).json()["data"][0]
+        approved = self.client.post(
+            endpoint, headers=headers, json={"decision": "approved", "cest_escolhido": "28.033.00"}
+        )
+
+        self.assertEqual([option["cest"] for option in listed["cest_candidates"]], ["20.063.00", "28.033.00"])
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["status"], "approved")
+        self.assertEqual(approved.json()["cest_escolhido"], "28.033.00")
+        db = self.Session()
+        try:
+            self.assertEqual(db.get(AuditItem, self.item_a.id).cest_escolhido, "28.033.00")
+        finally:
+            db.close()
+
+    def test_review_rejects_a_cest_outside_the_options_or_with_rejection(self) -> None:
+        endpoint = self._set_cest_candidates()
+        headers = self._headers_for("auditor-a")
+
+        outside = self.client.post(
+            endpoint, headers=headers, json={"decision": "approved", "cest_escolhido": "01.001.00"}
+        )
+        with_rejection = self.client.post(
+            endpoint, headers=headers, json={"decision": "rejected", "cest_escolhido": "20.063.00"}
+        )
+
+        self.assertEqual(outside.status_code, 422)
+        self.assertEqual(with_rejection.status_code, 422)
+        db = self.Session()
+        try:
+            item = db.get(AuditItem, self.item_a.id)
+            self.assertEqual(item.status, "pending_review")
+            self.assertIsNone(item.cest_escolhido)
+        finally:
+            db.close()
+
     def test_review_is_persisted_and_cannot_be_repeated(self) -> None:
         headers = self._headers_for("auditor-a")
         endpoint = f"/api/v1/audits/{self.audit_a.id}/items/{self.item_a.id}/review"

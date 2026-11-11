@@ -307,6 +307,33 @@ tr.row-pending-rejected, tr.row-pending-rejected:hover { background: color-mix(i
 .code-empty { color: var(--ink-3); font-size: 12px; }
 .reason { display: block; max-width: 300px; margin-top: 4px; color: var(--ink-3); font-size: 12px; line-height: 1.4; white-space: normal; }
 
+/* Opções de CEST do catálogo: escolha na revisão, registro depois da decisão. */
+.cest-options { margin: 9px 0 0; padding: 0; border: 0; display: grid; gap: 4px; min-width: 0; max-width: 300px; }
+.cest-options legend { padding: 0; margin-bottom: 4px; color: var(--ink-3); font-size: 11.5px; font-weight: 560; }
+.cest-option {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: center;
+  column-gap: 7px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-sunken);
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.cest-options-editable .cest-option { cursor: pointer; background: var(--surface-raised); border-color: var(--line); }
+.cest-options-editable .cest-option:hover { border-color: var(--line-strong); }
+.cest-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.cest-option-chosen { border-color: color-mix(in srgb, var(--green) 45%, transparent); background: var(--green-bg); }
+.cest-options-editable .cest-option-chosen { border-color: color-mix(in srgb, var(--green) 45%, transparent); background: var(--green-bg); }
+.cest-option input { margin: 0; accent-color: var(--green); }
+.cest-options:not(.cest-options-editable) .cest-option input { display: none; }
+.cest-options:not(.cest-options-editable) .cest-option { grid-template-columns: auto 1fr; }
+.cest-option-code { font-family: var(--font-mono); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cest-option-score { justify-self: end; color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.cest-option-desc { grid-column: 1 / -1; color: var(--ink-2); font-size: 11.5px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cest-options-editable .cest-option-desc { grid-column: 2 / -1; }
+
 .confidence { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; font-weight: 560; }
 .signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 12px; }
 .signal i { width: 3px; background: var(--line); border-radius: 1px; }

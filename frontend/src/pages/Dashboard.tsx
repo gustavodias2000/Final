@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 
 import { getAudit, getLatestAudit, reviewAuditItem, uploadAudit } from "../api/audits";
-import type { AuditItem, AuditItemStatus, AuditStatus, AuditUploadResponse, ReviewDecision } from "../api/contracts";
+import type { AuditItem, AuditItemStatus, AuditStatus, AuditUploadResponse, CestCandidate, ReviewDecision } from "../api/contracts";
 import { useAuth } from "../auth/AuthContext";
 import { ThemeToggle } from "../theme";
 
@@ -105,13 +105,37 @@ function hasCestAlert(item: AuditItem) {
   return CEST_ALERT_STATUSES.has(item.cest_status ?? "");
 }
 
+function cestOptions(item: AuditItem) {
+  return item.cest_candidates ?? [];
+}
+
+// O CEST que vale para o item: o escolhido na revisão ou, sem escolha, o sugerido.
+function finalCest(item: AuditItem) {
+  return item.cest_escolhido ?? item.cest_sugerido;
+}
+
+// Item com várias opções de CEST e nenhuma sugestão: a aprovação exige escolher uma.
+function needsCestChoice(item: AuditItem) {
+  return needsReview(item) && !item.cest_atual && !item.cest_sugerido && cestOptions(item).length > 1;
+}
+
+// Pré-seleciona a sugestão do sistema quando ela está entre as opções.
+function defaultCestChoice(item: AuditItem) {
+  return cestOptions(item).some((option) => option.cest === item.cest_sugerido) ? item.cest_sugerido ?? undefined : undefined;
+}
+
+function cestOptionsSummary(item: AuditItem) {
+  return cestOptions(item).map((option) => option.cest).join(" | ");
+}
+
 // A exportacao resumida representa a classificacao proposta. Ela entra quando
 // ao menos um dos codigos mudou; uma sugestao pendente continua no relatorio
 // para que a pessoa responsavel possa revisa-la fora do sistema, se necessario.
 function hasSuggestedClassificationChange(item: AuditItem) {
+  const cest = finalCest(item);
   return (
     Boolean(item.ncm_sugerido && item.ncm_sugerido !== item.ncm_atual)
-    || Boolean(item.cest_sugerido && item.cest_sugerido !== item.cest_atual)
+    || Boolean(cest && cest !== item.cest_atual)
   );
 }
 
@@ -189,13 +213,14 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [pending, setPending] = useState<Record<string, ReviewDecision>>({});
+  const [cestChoices, setCestChoices] = useState<Record<string, string>>({});
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [bulkDecision, setBulkDecision] = useState<ReviewDecision | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(true);
   const [announcement, setAnnouncement] = useState("");
   const auditRef = useRef(audit);
-  const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision }>());
+  const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision; cest?: string }>());
   auditRef.current = audit;
 
   useEffect(() => {
@@ -286,7 +311,7 @@ export default function Dashboard() {
     return audit.data.filter((item) => {
       if (!matchesFilter(item, filter)) return false;
       if (!normalizedQuery) return true;
-      const text = [item.codigo_produto, item.descricao, item.ncm_atual, item.ncm_sugerido, item.cest_atual, item.cest_sugerido]
+      const text = [item.codigo_produto, item.descricao, item.ncm_atual, item.ncm_sugerido, item.cest_atual, item.cest_sugerido, item.cest_escolhido]
         .filter(Boolean)
         .join(" ")
         .toLocaleLowerCase("pt-BR");
@@ -335,9 +360,9 @@ export default function Dashboard() {
 
   async function flushPending() {
     const queued = [...timers.current.values()];
-    await Promise.all(queued.map(({ timer, item, decision }) => {
+    await Promise.all(queued.map(({ timer, item, decision, cest }) => {
       window.clearTimeout(timer);
-      return commitDecision(item, decision);
+      return commitDecision(item, decision, cest);
     }));
   }
 
@@ -382,7 +407,7 @@ export default function Dashboard() {
     });
   }
 
-  async function commitDecision(item: AuditItem, decision: ReviewDecision) {
+  async function commitDecision(item: AuditItem, decision: ReviewDecision, cest?: string) {
     const current = auditRef.current;
     if (!current) return;
     // Captura o foco antes de a linha mudar, para devolvê-lo à próxima pendência.
@@ -402,12 +427,12 @@ export default function Dashboard() {
     });
     setBusyIds((value) => new Set(value).add(item.id));
     try {
-      const updated = await reviewAuditItem(current.audit_id, item.id, decision);
+      const updated = await reviewAuditItem(current.audit_id, item.id, decision, cest);
       setAudit((value) => value ? {
         ...value,
         data: value.data.map((candidate) => candidate.id === item.id ? updated : candidate),
       } : value);
-      setAnnouncement(`${item.descricao}: ${decisionMeta[decision].done}.`);
+      setAnnouncement(`${item.descricao}: ${decisionMeta[decision].done}${cest ? ` com CEST ${cest}` : ""}.`);
       if (hadFocus) focusAfter(followingIds);
     } catch (error) {
       setError(reviewErrorMessage(error, item));
@@ -420,11 +445,25 @@ export default function Dashboard() {
     }
   }
 
+  function cestChoiceFor(item: AuditItem) {
+    return cestChoices[item.id] ?? defaultCestChoice(item);
+  }
+
+  function chooseCest(item: AuditItem, cest: string) {
+    setCestChoices((value) => ({ ...value, [item.id]: cest }));
+  }
+
   function decide(item: AuditItem, decision: ReviewDecision) {
     if (timers.current.has(item.id)) return;
+    const cest = decision === "approved" ? cestChoiceFor(item) : undefined;
+    if (decision === "approved" && needsCestChoice(item) && !cest) {
+      setError(`Escolha um dos CESTs de "${item.descricao}" antes de aprovar.`);
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`${rowSelector(item.id)} .cest-option input`)?.focus());
+      return;
+    }
     setError(null);
-    const timer = window.setTimeout(() => commitDecision(item, decision), UNDO_MS);
-    timers.current.set(item.id, { timer, item, decision });
+    const timer = window.setTimeout(() => commitDecision(item, decision, cest), UNDO_MS);
+    timers.current.set(item.id, { timer, item, decision, cest });
     setPending((value) => ({ ...value, [item.id]: decision }));
     setAnnouncement(`${item.descricao} será ${decisionMeta[decision].done} em 5 segundos. Use Desfazer para cancelar.`);
     requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`${rowSelector(item.id)} .undo-btn`)?.focus());
@@ -452,17 +491,30 @@ export default function Dashboard() {
       return;
     }
     const action = decision === "approved" ? "aprovar" : "rejeitar";
-    const count = reviewableItems.length;
-    if (!window.confirm(`Deseja ${action} os ${count} ${count === 1 ? "item pendente" : "itens pendentes"}? Esta ação não poderá ser desfeita.`)) return;
+    // Na aprovação em lote, itens que exigem escolha de CEST sem escolha feita ficam de fora.
+    const targets = decision === "approved"
+      ? reviewableItems.filter((item) => !needsCestChoice(item) || cestChoiceFor(item))
+      : reviewableItems;
+    const skipped = reviewableItems.length - targets.length;
+    if (!targets.length) {
+      setError("Todos os itens pendentes exigem a escolha de um CEST. Escolha nas linhas antes de aprovar.");
+      return;
+    }
+    const count = targets.length;
+    const skippedNote = skipped
+      ? ` ${skipped} ${skipped === 1 ? "item ficará" : "itens ficarão"} de fora porque ${skipped === 1 ? "exige" : "exigem"} a escolha de um CEST.`
+      : "";
+    if (!window.confirm(`Deseja ${action} os ${count} ${count === 1 ? "item pendente" : "itens pendentes"}?${skippedNote} Esta ação não poderá ser desfeita.`)) return;
 
     setBulkDecision(decision);
     setError(null);
-    setBusyIds(new Set(reviewableItems.map((item) => item.id)));
+    setBusyIds(new Set(targets.map((item) => item.id)));
     let completed = 0;
     let failed = 0;
-    for (const item of reviewableItems) {
+    for (const item of targets) {
       try {
-        const updated = await reviewAuditItem(current.audit_id, item.id, decision);
+        const cest = decision === "approved" ? cestChoiceFor(item) : undefined;
+        const updated = await reviewAuditItem(current.audit_id, item.id, decision, cest);
         completed += 1;
         setAudit((value) => value ? {
           ...value,
@@ -483,7 +535,9 @@ export default function Dashboard() {
       setError(`${completed} itens foram ${decision === "approved" ? "aprovados" : "rejeitados"}; ${failed} não puderam ser atualizados. Recarregue a página antes de tentar novamente.`);
       return;
     }
-    setAnnouncement(`${completed} ${completed === 1 ? "item foi" : "itens foram"} ${decision === "approved" ? "aprovados" : "rejeitados"}.`);
+    const leftOut = skipped ? ` ${skipped} ${skipped === 1 ? "item aguarda" : "itens aguardam"} a escolha de um CEST.` : "";
+    setAnnouncement(`${completed} ${completed === 1 ? "item foi" : "itens foram"} ${decision === "approved" ? "aprovados" : "rejeitados"}.${leftOut}`);
+    if (skipped) setError(`${skipped} ${skipped === 1 ? "item não foi aprovado porque exige" : "itens não foram aprovados porque exigem"} a escolha de um CEST. Escolha nas linhas e aprove individualmente.`);
   }
 
   function downloadCsv(columns: string[], rows: string[][], filename: string) {
@@ -498,7 +552,7 @@ export default function Dashboard() {
 
   function exportDetailedResults() {
     if (!audit?.data.length) return;
-    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
+    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "CEST escolhido", "Opções de CEST", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
     const rows = audit.data.map((item) => [
       item.codigo_produto,
       item.descricao,
@@ -507,6 +561,8 @@ export default function Dashboard() {
       ncmResult(item).label,
       item.cest_atual ?? "",
       item.cest_sugerido ?? "",
+      item.cest_escolhido ?? "",
+      cestOptionsSummary(item),
       cestResult(item).label,
       item.score.toString(),
       statusMeta[item.status].label,
@@ -530,7 +586,7 @@ export default function Dashboard() {
         item.codigo_produto,
         item.descricao,
         proposedCode(item.ncm_atual, item.ncm_sugerido),
-        proposedCode(item.cest_atual, item.cest_sugerido),
+        proposedCode(item.cest_atual, finalCest(item)),
       ]);
     downloadCsv(columns, rows, `auditoria-${audit.audit_id}-resumida.csv`);
   }
@@ -596,15 +652,15 @@ export default function Dashboard() {
 
   function exportStyledDetailedResults() {
     if (!audit?.data.length) return;
-    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
-    const rows = audit.data.map((item) => [item.codigo_produto, item.descricao, item.ncm_atual ?? "", item.ncm_sugerido ?? "", ncmResult(item).label, item.cest_atual ?? "", item.cest_sugerido ?? "", cestResult(item).label, item.score.toString(), statusMeta[item.status].label, item.motivo, item.cest_status ?? "", item.cest_source_url ?? "", item.cest_evidence ?? "", attemptSummary(item), item.fonte_referencia ?? "", item.versao_referencia ?? ""]);
+    const columns = ["Código", "Descrição", "NCM atual", "NCM sugerido", "Resultado NCM", "CEST atual", "CEST sugerido", "CEST escolhido", "Opções de CEST", "Resultado CEST", "Score", "Decisão humana", "Motivo", "Status técnico CEST", "Fonte CEST", "Evidência CEST", "Tentativas de consulta", "Fonte NCM", "Versão NCM"];
+    const rows = audit.data.map((item) => [item.codigo_produto, item.descricao, item.ncm_atual ?? "", item.ncm_sugerido ?? "", ncmResult(item).label, item.cest_atual ?? "", item.cest_sugerido ?? "", item.cest_escolhido ?? "", cestOptionsSummary(item), cestResult(item).label, item.score.toString(), statusMeta[item.status].label, item.motivo, item.cest_status ?? "", item.cest_source_url ?? "", item.cest_evidence ?? "", attemptSummary(item), item.fonte_referencia ?? "", item.versao_referencia ?? ""]);
     downloadWorkbook(buildStyledWorkbook("Relatório detalhado de auditoria", "Todas as classificações, evidências e decisões da auditoria.", columns, rows), `auditoria-${audit.audit_id}-detalhada.xlsx`);
   }
 
   function exportStyledSummaryResults() {
     if (!audit?.data.length) return;
     const columns = ["codigo_produto", "descricao", "NCM", "CEST"];
-    const rows = audit.data.filter(hasSuggestedClassificationChange).map((item) => [item.codigo_produto, item.descricao, proposedCode(item.ncm_atual, item.ncm_sugerido), proposedCode(item.cest_atual, item.cest_sugerido)]);
+    const rows = audit.data.filter(hasSuggestedClassificationChange).map((item) => [item.codigo_produto, item.descricao, proposedCode(item.ncm_atual, item.ncm_sugerido), proposedCode(item.cest_atual, finalCest(item))]);
     downloadWorkbook(buildStyledWorkbook("Relatório resumido de alterações", "Somente produtos com alteração sugerida de NCM ou CEST.", columns, rows), `auditoria-${audit.audit_id}-resumida.xlsx`);
   }
 
@@ -735,6 +791,8 @@ export default function Dashboard() {
                     pending={pending[item.id]}
                     busy={busyIds.has(item.id)}
                     open={openId === item.id}
+                    cestChoice={pending[item.id] ? timers.current.get(item.id)?.cest : cestChoiceFor(item)}
+                    onChooseCest={chooseCest}
                     onToggle={() => setOpenId((current) => current === item.id ? null : item.id)}
                     onDecide={decide}
                     onUndo={undo}
@@ -759,11 +817,13 @@ export default function Dashboard() {
   );
 }
 
-function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
+function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggle, onDecide, onUndo }: {
   item: AuditItem;
   pending: ReviewDecision | undefined;
   busy: boolean;
   open: boolean;
+  cestChoice: string | undefined;
+  onChooseCest: (item: AuditItem, cest: string) => void;
   onToggle: () => void;
   onDecide: (item: AuditItem, decision: ReviewDecision) => void;
   onUndo: (item: AuditItem) => void;
@@ -773,6 +833,12 @@ function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
   const cestClassification = cestResult(item);
   const canReview = needsReview(item);
   const decided = item.status === "approved" || item.status === "rejected";
+  const options = cestOptions(item);
+  const choiceRequired = needsCestChoice(item);
+  const displayedCest = item.cest_escolhido ?? (pending === "approved" && cestChoice ? cestChoice : item.cest_sugerido);
+  const cestBadge: ClassificationResult = item.cest_escolhido
+    ? { label: "Escolhido na revisão", tone: "success" }
+    : cestClassification;
   const hasEvidence = Boolean(item.fonte_referencia || item.cest_status || item.cest_evidence || item.cest_source_url || item.reference_attempts?.length);
   const detailId = `evidence-${item.id}`;
   const rowClass = ["row", open && "row-open", decided && "row-decided", pending && `row-pending row-pending-${pending}`].filter(Boolean).join(" ");
@@ -797,9 +863,17 @@ function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
       </td>
       <td className="cell-cest" data-label="CEST">
         <div className="classification">
-          <CodeChange label="CEST" current={item.cest_atual} suggested={item.cest_sugerido} groups={CEST_GROUPS} empty={item.cest_status === "catalog_not_found" ? "Não encontrado" : "Sem CEST informado"} />
-          <span className={`badge ${cestClassification.tone}`}>CEST: {cestClassification.label}</span>
+          <CodeChange label="CEST" current={item.cest_atual} suggested={displayedCest} groups={CEST_GROUPS} empty={item.cest_status === "catalog_not_found" ? "Não encontrado" : "Sem CEST informado"} />
+          <span className={`badge ${cestBadge.tone}`}>CEST: {cestBadge.label}</span>
         </div>
+        {options.length > 1 ? <CestOptions
+          item={item}
+          options={options}
+          selected={decided ? item.cest_escolhido ?? undefined : canReview ? cestChoice : undefined}
+          editable={canReview && !pending && !busy}
+          required={choiceRequired}
+          onChoose={(cest) => onChooseCest(item, cest)}
+        /> : null}
       </td>
       <td className="num cell-score" data-label="Confiança"><Confidence score={item.score} /></td>
       <td className="cell-status"><span className={`badge ${meta.tone}`}>{meta.label}</span></td>
@@ -807,7 +881,13 @@ function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
         {pending ? <button className="review-btn undo-btn" onClick={() => onUndo(item)}>
           <RotateCcw size={14} aria-hidden="true" /> Desfazer
         </button> : canReview ? <div className="review-actions">
-          <button className="review-btn approve" disabled={busy} onClick={() => onDecide(item, "approved")}>
+          <button
+            className="review-btn approve"
+            disabled={busy}
+            aria-disabled={choiceRequired && !cestChoice ? true : undefined}
+            title={choiceRequired && !cestChoice ? "Escolha um CEST entre as opções antes de aprovar" : undefined}
+            onClick={() => onDecide(item, "approved")}
+          >
             {busy ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />} Aprovar
           </button>
           <button className="review-btn reject" disabled={busy} onClick={() => onDecide(item, "rejected")}>
@@ -820,6 +900,41 @@ function AuditRow({ item, pending, busy, open, onToggle, onDecide, onUndo }: {
       <td colSpan={6}><EvidencePanel item={item} /></td>
     </tr> : null}
   </Fragment>;
+}
+
+// Opções de CEST do catálogo para o NCM. Enquanto o item aguarda revisão, viram uma
+// escolha; depois da decisão, ficam como registro, destacando a opção escolhida.
+function CestOptions({ item, options, selected, editable, required, onChoose }: {
+  item: AuditItem;
+  options: CestCandidate[];
+  selected: string | undefined;
+  editable: boolean;
+  required: boolean;
+  onChoose: (cest: string) => void;
+}) {
+  const chosen = item.cest_escolhido ?? selected;
+  const legend = editable
+    ? required ? "Escolha o CEST" : "Trocar CEST (opcional)"
+    : `${options.length} opções de CEST`;
+  return <fieldset className={`cest-options${editable ? " cest-options-editable" : ""}`} disabled={!editable}>
+    <legend>{legend}</legend>
+    {options.map((option) => {
+      const isChosen = option.cest === chosen;
+      const scoreLabel = option.score === null ? null : `${Math.round(option.score)}%`;
+      return <label key={option.cest} className={`cest-option${isChosen ? " cest-option-chosen" : ""}`} title={option.descricao ?? undefined}>
+        <input
+          type="radio"
+          name={`cest-${item.id}`}
+          value={option.cest}
+          checked={isChosen}
+          onChange={() => onChoose(option.cest)}
+        />
+        <span className="cest-option-code">{formatCode(option.cest, CEST_GROUPS)}</span>
+        {scoreLabel ? <span className="cest-option-score" aria-label={`similaridade ${scoreLabel}`}>{scoreLabel}</span> : null}
+        {option.descricao ? <span className="cest-option-desc">{option.descricao}</span> : null}
+      </label>;
+    })}
+  </fieldset>;
 }
 
 function CodeChange({ label, current, suggested, groups, empty }: {

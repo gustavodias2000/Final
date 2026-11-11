@@ -14,6 +14,7 @@ from app.schemas.audit import (
     AuditStatus,
     AuditSummary,
     AuditUploadResponse,
+    ReviewDecision,
 )
 from app.services.excel_parser import parse_excel
 
@@ -110,6 +111,20 @@ def review_audit_item(
     if item.status not in {"suggested", "pending_review"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Item não está disponível para revisão.")
 
+    if request.cest_escolhido is not None:
+        if request.decision is not ReviewDecision.APPROVED:
+            raise HTTPException(
+                status_code=422,
+                detail="Um CEST só pode ser escolhido ao aprovar o item.",
+            )
+        eligible = {candidate.get("cest") for candidate in item.cest_candidates or []}
+        if request.cest_escolhido not in eligible:
+            raise HTTPException(
+                status_code=422,
+                detail="O CEST escolhido não está entre as opções elegíveis para este item.",
+            )
+        item.cest_escolhido = request.cest_escolhido
+
     item.status = request.decision.value
     item.reviewed_by_user_id = current_user.id
     item.reviewed_at = datetime.now(timezone.utc)
@@ -161,4 +176,6 @@ def _to_item_response(item: AuditItem) -> AuditItemResponse:
         cest_source_url=item.cest_source_url,
         cest_evidence=item.cest_evidence,
         reference_attempts=item.reference_attempts or [],
+        cest_candidates=item.cest_candidates or [],
+        cest_escolhido=item.cest_escolhido,
     )
