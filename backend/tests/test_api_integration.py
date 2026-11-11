@@ -6,6 +6,7 @@ from io import BytesIO
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from openpyxl import Workbook
@@ -108,6 +109,24 @@ class ApiIntegrationTests(unittest.TestCase):
 
     def _headers_for(self, username: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token_for(username)}"}
+
+    def test_database_health_check_queries_the_database(self) -> None:
+        response = self.client.get("/health/db")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok", "database": "ok"})
+
+    def test_database_health_check_reports_unreachable_database(self) -> None:
+        class BrokenSession:
+            def execute(self, *_args, **_kwargs):
+                raise OperationalError("SELECT 1", {}, Exception("banco pausado"))
+
+        app.dependency_overrides[get_db] = lambda: BrokenSession()
+
+        response = self.client.get("/health/db")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["database"], "unreachable")
 
     def test_login_rejects_invalid_credentials(self) -> None:
         response = self.client.post(

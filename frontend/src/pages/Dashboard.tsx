@@ -161,7 +161,9 @@ function byUrgency(a: AuditItem, b: AuditItem) {
   return pendingA ? a.score - b.score : 0;
 }
 
-type ClassificationResult = { label: string; tone: "success" | "warning" | "danger" | "neutral" };
+// Cores por situação: amarelo pede uma ação sua, azul é sugestão do sistema,
+// vermelho é problema, verde é confirmado e cinza é só informação.
+type ClassificationResult = { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info" };
 
 function ncmResult(item: AuditItem): ClassificationResult {
   return item.ncm_sugerido
@@ -186,11 +188,11 @@ function cestResult(item: AuditItem): ClassificationResult {
     case "catalog_no_cest_for_ncm":
       return { label: "Sem CEST elegível: revisar", tone: "danger" };
     case "catalog_not_found":
-      return { label: "Não verificado", tone: "warning" };
+      return { label: "NCM fora do catálogo", tone: "neutral" };
     case "catalog_multiple":
-      return { label: "Múltiplas opções", tone: "warning" };
+      return { label: "Escolha entre as opções", tone: "warning" };
     case "catalog_ranked":
-      return { label: "Sugestão disponível", tone: "warning" };
+      return { label: "Sugestão disponível", tone: "info" };
     case "catalog_found":
       return { label: "Referência encontrada", tone: "neutral" };
     default:
@@ -835,6 +837,8 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
   const decided = item.status === "approved" || item.status === "rejected";
   const options = cestOptions(item);
   const choiceRequired = needsCestChoice(item);
+  const choiceMissing = choiceRequired && !cestChoice;
+  const choiceHintId = `cest-hint-${item.id}`;
   const displayedCest = item.cest_escolhido ?? (pending === "approved" && cestChoice ? cestChoice : item.cest_sugerido);
   const cestBadge: ClassificationResult = item.cest_escolhido
     ? { label: "Escolhido na revisão", tone: "success" }
@@ -863,7 +867,7 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
       </td>
       <td className="cell-cest" data-label="CEST">
         <div className="classification">
-          <CodeChange label="CEST" current={item.cest_atual} suggested={displayedCest} groups={CEST_GROUPS} empty={item.cest_status === "catalog_not_found" ? "Não encontrado" : "Sem CEST informado"} />
+          <CodeChange label="CEST" current={item.cest_atual} suggested={displayedCest} groups={CEST_GROUPS} empty="Sem CEST informado" />
           <span className={`badge ${cestBadge.tone}`}>CEST: {cestBadge.label}</span>
         </div>
         {options.length > 1 ? <CestOptions
@@ -880,12 +884,12 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
       <td className="actions-cell">
         {pending ? <button className="review-btn undo-btn" onClick={() => onUndo(item)}>
           <RotateCcw size={14} aria-hidden="true" /> Desfazer
-        </button> : canReview ? <div className="review-actions">
+        </button> : canReview ? <><div className="review-actions">
           <button
             className="review-btn approve"
             disabled={busy}
-            aria-disabled={choiceRequired && !cestChoice ? true : undefined}
-            title={choiceRequired && !cestChoice ? "Escolha um CEST entre as opções antes de aprovar" : undefined}
+            aria-disabled={choiceMissing || undefined}
+            aria-describedby={choiceMissing ? choiceHintId : undefined}
             onClick={() => onDecide(item, "approved")}
           >
             {busy ? <LoaderCircle className="spin" size={14} aria-hidden="true" /> : <Check size={14} aria-hidden="true" />} Aprovar
@@ -893,7 +897,9 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
           <button className="review-btn reject" disabled={busy} onClick={() => onDecide(item, "rejected")}>
             <X size={14} aria-hidden="true" /> Rejeitar
           </button>
-        </div> : null}
+        </div>
+        {choiceMissing ? <p className="choice-hint" id={choiceHintId}>Escolha um CEST para aprovar</p> : null}
+        </> : null}
       </td>
     </tr>
     {open && hasEvidence ? <tr className="evidence-row" id={detailId}>
@@ -921,7 +927,7 @@ function CestOptions({ item, options, selected, editable, required, onChoose }: 
     {options.map((option) => {
       const isChosen = option.cest === chosen;
       const scoreLabel = option.score === null ? null : `${Math.round(option.score)}%`;
-      return <label key={option.cest} className={`cest-option${isChosen ? " cest-option-chosen" : ""}`} title={option.descricao ?? undefined}>
+      return <label key={option.cest} className={`cest-option${isChosen ? " cest-option-chosen" : ""}`}>
         <input
           type="radio"
           name={`cest-${item.id}`}
