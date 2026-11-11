@@ -1,6 +1,7 @@
 """Fluxos HTTP críticos: autenticação, isolamento por tenant e revisão."""
 
 import unittest
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 from io import BytesIO
 
@@ -12,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from openpyxl import Workbook
 
 from app.api.dependencies import get_db
+from app.core.login_throttle import login_throttle
 from app.core.security import hash_password
 from app.db.models import Audit, AuditItem, Tenant, User
 from app.db.session import Base
@@ -41,6 +43,8 @@ class ApiIntegrationTests(unittest.TestCase):
                 db.close()
 
         app.dependency_overrides[get_db] = override_get_db
+        login_throttle.clear()
+        self.addCleanup(login_throttle.clear)
         self.client = TestClient(app)
         self.addCleanup(self._cleanup)
         self._seed_data()
@@ -127,6 +131,71 @@ class ApiIntegrationTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["database"], "unreachable")
+
+    def test_login_is_blocked_after_repeated_failures_even_with_the_right_password(self) -> None:
+        for _ in range(5):
+            response = self.client.post("/api/v1/auth/login", json={"username": "auditor-a", "password": "errada"})
+            self.assertEqual(response.status_code, 401)
+
+        blocked = self.client.post("/api/v1/auth/login", json={"username": "Auditor-A ", "password": "senha-segura"})
+        other_user = self.client.post("/api/v1/auth/login", json={"username": "auditor-b", "password": "senha-segura"})
+
+        self.assertEqual(blocked.status_code, 429)
+        self.assertIn("Muitas tentativas", blocked.json()["detail"])
+        self.assertGreater(int(blocked.headers["Retry-After"]), 0)
+        self.assertEqual(other_user.status_code, 200)
+
+    def test_successful_login_resets_the_failure_count(self) -> None:
+        for _ in range(4):
+            self.client.post("/api/v1/auth/login", json={"username": "auditor-a", "password": "errada"})
+        self._token_for("auditor-a")
+        for _ in range(4):
+            response = self.client.post("/api/v1/auth/login", json={"username": "auditor-a", "password": "errada"})
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_large_responses_are_compressed(self) -> None:
+        response = self.client.get("/openapi.json", headers={"Accept-Encoding": "gzip"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("content-encoding"), "gzip")
+
+    def test_audit_history_lists_tenant_audits_newest_first_with_decision_counts(self) -> None:
+        db = self.Session()
+        try:
+            older = Audit(
+                id=uuid4(), tenant_id=self.tenant_a.id, source_filename="antiga.xlsx", source_file_sha256="b" * 64,
+                source_file_size_bytes=64, status="completed", total_produtos=2, processados=2, errors=[],
+                created_at=datetime(2026, 1, 5, 9, 0, tzinfo=timezone.utc),
+            )
+            other_tenant = Audit(
+                id=uuid4(), tenant_id=self.tenant_b.id, source_filename="outra-empresa.xlsx", source_file_sha256="c" * 64,
+                source_file_size_bytes=64, status="completed", total_produtos=1, processados=1, errors=[],
+            )
+            db.query(Audit).filter(Audit.id == self.audit_a.id).update({Audit.created_at: datetime(2026, 2, 1, 9, 0, tzinfo=timezone.utc)})
+            base = dict(audit_id=older.id, descricao="Item", score=90.0, motivo="Teste.")
+            db.add_all([
+                older,
+                other_tenant,
+                AuditItem(id=uuid4(), codigo_produto="A1", status="approved", **base),
+                AuditItem(id=uuid4(), codigo_produto="A2", status="rejected", **base),
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        response = self.client.get("/api/v1/audits", headers=self._headers_for("auditor-a"))
+        limited = self.client.get("/api/v1/audits?limit=1", headers=self._headers_for("auditor-a"))
+        unauthenticated = self.client.get("/api/v1/audits")
+
+        self.assertEqual(response.status_code, 200)
+        history = response.json()
+        self.assertEqual([entry["arquivo"] for entry in history], ["cadastro.xlsx", "antiga.xlsx"])
+        self.assertEqual(history[0]["pendentes"], 1)
+        self.assertEqual((history[1]["aprovados"], history[1]["rejeitados"], history[1]["pendentes"]), (1, 1, 0))
+        self.assertNotIn("data", history[0])
+        self.assertEqual(len(limited.json()), 1)
+        self.assertEqual(unauthenticated.status_code, 401)
 
     def test_login_rejects_invalid_credentials(self) -> None:
         response = self.client.post(

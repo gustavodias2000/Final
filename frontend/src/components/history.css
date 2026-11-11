@@ -1,0 +1,60 @@
+/* ---------- Histórico de auditorias ---------- */
+.history-panel {
+  margin-bottom: 18px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  animation: reveal 220ms var(--ease-out) both;
+}
+.history-head { padding: 12px 12px 12px 16px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--line); }
+.history-head h2 { display: inline-flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; }
+.history-head h2 svg { color: var(--accent); }
+.history-head small { color: var(--ink-3); font-size: 12.5px; }
+.history-close { margin-left: auto; }
+
+.history-list { margin: 0; padding: 0; list-style: none; }
+.history-item {
+  padding: 12px 16px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto 112px;
+  align-items: center;
+  gap: 6px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.history-item:first-child { border-top: 0; }
+.history-item-current { background: var(--accent-soft); }
+.history-item-loading { grid-template-columns: 1fr; gap: 8px; padding-block: 16px; }
+.history-icon { color: var(--ink-3); }
+.history-item-current .history-icon { color: var(--accent); }
+.history-main { display: grid; gap: 2px; min-width: 0; }
+.history-main strong { overflow: hidden; font-size: 13.5px; font-weight: 580; text-overflow: ellipsis; white-space: nowrap; }
+.history-meta { color: var(--ink-3); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.history-counts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px; color: var(--ink-2); font-size: 12.5px; }
+.history-counts strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.history-count-pending, .history-count-pending strong { color: var(--amber); }
+.history-count-done { display: inline-flex; align-items: center; gap: 4px; color: var(--green); font-weight: 560; }
+.history-action { display: flex; justify-content: flex-end; }
+.history-action .button { min-width: 88px; }
+.history-current { color: var(--accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+
+.history-message { margin: 0; padding: 20px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-2); font-size: 13px; }
+.history-message-error { color: var(--red); }
+.history-message-error .button { margin-left: auto; }
+
+@media (max-width: 720px) {
+  .history-head small { display: none; }
+  .history-item {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "icon main status" "icon counts counts" "icon action action";
+    align-items: start;
+  }
+  .history-icon { grid-area: icon; margin-top: 2px; }
+  .history-main { grid-area: main; }
+  .history-item > .badge { grid-area: status; }
+  .history-counts { grid-area: counts; justify-content: flex-start; }
+  .history-action { grid-area: action; justify-content: flex-start; }
+  .history-action .button { width: 100%; }
+  .history-item-loading { grid-template-columns: 1fr; grid-template-areas: none; }
+}

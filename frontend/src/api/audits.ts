@@ -1,5 +1,5 @@
 import api from "./client";
-import type { AuditItem, AuditUploadResponse, ReviewDecision } from "./contracts";
+import type { AuditHistoryEntry, AuditItem, AuditUploadResponse, ReviewDecision } from "./contracts";
 
 export async function uploadAudit(file: File): Promise<AuditUploadResponse> {
   const formData = new FormData();
@@ -15,6 +15,11 @@ export async function uploadAudit(file: File): Promise<AuditUploadResponse> {
 
 export async function getAudit(auditId: string): Promise<AuditUploadResponse> {
   const { data } = await api.get<AuditUploadResponse>(`/api/v1/audits/${auditId}`);
+  return data;
+}
+
+export async function listAudits(limit = 20): Promise<AuditHistoryEntry[]> {
+  const { data } = await api.get<AuditHistoryEntry[]>("/api/v1/audits", { params: { limit } });
   return data;
 }
 

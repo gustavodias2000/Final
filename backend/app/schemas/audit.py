@@ -4,6 +4,7 @@ Estes modelos são deliberadamente independentes dos modelos SQLAlchemy. Eles
 definem o formato estável exposto ao frontend e a futuros consumidores da API.
 """
 
+from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
@@ -89,6 +90,21 @@ class AuditUploadResponse(BaseModel):
     data: list[AuditItemResponse]
     progresso: AuditProgress
     errors: list[str] = []
+
+
+class AuditHistoryEntry(BaseModel):
+    """Uma auditoria anterior, sem os itens, para a lista de histórico."""
+
+    audit_id: UUID
+    arquivo: str
+    status: AuditStatus
+    criada_em: datetime
+    concluida_em: datetime | None = None
+    total_produtos: int = Field(ge=0)
+    pendentes: int = Field(ge=0)
+    aprovados: int = Field(ge=0)
+    rejeitados: int = Field(ge=0)
+    sem_sugestao: int = Field(ge=0)
 
 
 class ApiError(BaseModel):

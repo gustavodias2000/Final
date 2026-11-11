@@ -1,13 +1,16 @@
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user, get_db
 from app.core.config import settings
 from app.db.models import Audit, AuditInputItem, AuditItem, User
 from app.schemas.audit import (
+    AuditHistoryEntry,
     AuditItemResponse,
     AuditItemReviewRequest,
     AuditProgress,
@@ -49,6 +52,48 @@ def upload(
     db.commit()
     db.refresh(audit)
     return _to_response(audit, [])
+
+
+@router.get("", response_model=list[AuditHistoryEntry])
+def list_audits(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[AuditHistoryEntry]:
+    """Lista as auditorias do tenant, da mais recente para a mais antiga, sem os itens."""
+    audits = (
+        db.query(Audit)
+        .filter(Audit.tenant_id == current_user.tenant_id)
+        .order_by(Audit.created_at.desc(), Audit.id)
+        .limit(limit)
+        .all()
+    )
+    counts: defaultdict[UUID, Counter[str]] = defaultdict(Counter)
+    if audits:
+        rows = (
+            db.query(AuditItem.audit_id, AuditItem.status, func.count())
+            .filter(AuditItem.audit_id.in_([audit.id for audit in audits]))
+            .group_by(AuditItem.audit_id, AuditItem.status)
+            .all()
+        )
+        for audit_id, item_status, total in rows:
+            counts[audit_id][item_status] = total
+
+    return [
+        AuditHistoryEntry(
+            audit_id=audit.id,
+            arquivo=audit.source_filename,
+            status=AuditStatus(audit.status),
+            criada_em=audit.created_at,
+            concluida_em=audit.completed_at,
+            total_produtos=audit.total_produtos,
+            pendentes=counts[audit.id]["suggested"] + counts[audit.id]["pending_review"],
+            aprovados=counts[audit.id]["approved"],
+            rejeitados=counts[audit.id]["rejected"],
+            sem_sugestao=counts[audit.id]["no_suggestion"],
+        )
+        for audit in audits
+    ]
 
 
 @router.get("/latest", response_model=AuditUploadResponse)

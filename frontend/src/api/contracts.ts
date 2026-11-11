@@ -69,3 +69,17 @@ export interface ApiError {
   message: string;
   details: string[];
 }
+
+// Uma auditoria anterior, sem os itens, para a lista de histórico.
+export type AuditHistoryEntry = {
+  audit_id: string;
+  arquivo: string;
+  status: AuditStatus;
+  criada_em: string;
+  concluida_em: string | null;
+  total_produtos: number;
+  pendentes: number;
+  aprovados: number;
+  rejeitados: number;
+  sem_sugestao: number;
+};

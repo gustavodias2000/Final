@@ -42,6 +42,10 @@ function loginError(error: unknown): LoginError {
     return { message: "Não foi possível entrar. Tente novamente.", credentials: false };
   }
   if (error.response?.status === 401) return { message: "Usuário ou senha inválidos.", credentials: true };
+  if (error.response?.status === 429) {
+    const detail = (error.response.data as { detail?: unknown } | undefined)?.detail;
+    return { message: typeof detail === "string" ? detail : "Muitas tentativas sem sucesso. Aguarde alguns minutos e tente de novo.", credentials: false };
+  }
   if (!error.response) {
     return { message: "Não foi possível falar com o servidor. Confira sua internet; se estiver tudo certo, o servidor pode estar iniciando: tente de novo em um minuto.", credentials: false };
   }

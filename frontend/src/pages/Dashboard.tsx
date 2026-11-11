@@ -10,6 +10,7 @@ import {
   Eraser,
   FileSpreadsheet,
   FileUp,
+  History,
   ListChecks,
   LoaderCircle,
   LogOut,
@@ -26,6 +27,7 @@ import { useAuth } from "../auth/AuthContext";
 import { ThemeToggle } from "../theme";
 import { useConfirm } from "../components/ConfirmDialog";
 import { MenuButton } from "../components/MenuButton";
+import { AuditHistory } from "../components/AuditHistory";
 
 type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_suggestion";
 
@@ -33,6 +35,8 @@ type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_su
 // no navegador por alguns segundos para que um clique errado possa ser desfeito.
 const UNDO_MS = 5000;
 const POLL_MS = 1500;
+// A tabela desenha os itens aos poucos: planilhas grandes travariam a página de uma vez.
+const PAGE_SIZE = 50;
 const MAX_POLL_FAILURES = 5;
 const LAST_AUDIT_ID_KEY = "last_audit_id";
 
@@ -243,6 +247,9 @@ export default function Dashboard() {
   const [bulkDecision, setBulkDecision] = useState<ReviewDecision | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(true);
+  const [showHistory, setShowHistory] = useState(false);
+  const [openingAuditId, setOpeningAuditId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [announcement, setAnnouncement] = useState("");
   const auditRef = useRef(audit);
   const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision; cest?: string }>());
@@ -361,6 +368,11 @@ export default function Dashboard() {
     }).sort(byUrgency);
   }, [audit, filter, query]);
 
+  // Volta para a primeira página quando a lista muda de filtro, busca ou auditoria.
+  useEffect(() => { setVisibleCount(PAGE_SIZE); }, [filter, query, audit?.audit_id]);
+  const visibleItems = filteredItems.slice(0, visibleCount);
+  const hiddenCount = filteredItems.length - visibleItems.length;
+
   const progress = audit && audit.progresso.total > 0
     ? Math.round((audit.progresso.processados / audit.progresso.total) * 100)
     : 0;
@@ -430,6 +442,33 @@ export default function Dashboard() {
         : uploadErrorMessage(error));
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function openAudit(auditId: string) {
+    if (auditId === audit?.audit_id) {
+      setShowHistory(false);
+      return;
+    }
+    setOpeningAuditId(auditId);
+    setError(null);
+    try {
+      await flushPending();
+      const opened = await getAudit(auditId);
+      localStorage.setItem(LAST_AUDIT_ID_KEY, opened.audit_id);
+      setAudit(opened);
+      setShowHistory(false);
+      setShowUpload(false);
+      setFile(null);
+      setPollError(null);
+      setFilter("all");
+      setQuery("");
+      setOpenId(null);
+      setAnnouncement(`Auditoria ${opened.arquivo} aberta.`);
+    } catch {
+      setError("Não foi possível abrir essa auditoria. Tente novamente.");
+    } finally {
+      setOpeningAuditId(null);
     }
   }
 
@@ -732,12 +771,22 @@ export default function Dashboard() {
               ? "Aprove apenas o que tiver evidência suficiente. Cada decisão fica registrada."
               : "Envie o cadastro de produtos, acompanhe a análise e decida item a item."}</p>
           </div>
-          {audit ? <div className="audit-page-actions">
-            <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setFile(null); }} aria-expanded={showUpload}>
-              {showUpload ? <><X size={15} aria-hidden="true" /> Cancelar</> : <><FileUp size={15} aria-hidden="true" /> Nova auditoria</>}
+          <div className="audit-page-actions">
+            <button className="button button-ghost" onClick={() => { setShowHistory((value) => !value); if (audit) setShowUpload(false); }} aria-expanded={showHistory}>
+              <History size={15} aria-hidden="true" /> Histórico
             </button>
-          </div> : null}
+            {audit ? <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setShowHistory(false); setFile(null); }} aria-expanded={showUpload}>
+              {showUpload ? <><X size={15} aria-hidden="true" /> Cancelar</> : <><FileUp size={15} aria-hidden="true" /> Nova auditoria</>}
+            </button> : null}
+          </div>
         </div>
+
+        {showHistory ? <AuditHistory
+          currentAuditId={audit?.audit_id ?? null}
+          openingAuditId={openingAuditId}
+          onOpen={(auditId) => void openAudit(auditId)}
+          onClose={() => setShowHistory(false)}
+        /> : null}
 
         {!audit || showUpload ? <section className="upload-panel" aria-label="Envio de planilha">
           <div className="upload-file-area">
@@ -849,7 +898,7 @@ export default function Dashboard() {
               <table>
                 <thead><tr><th>Produto</th><th>Resultado NCM</th><th>Resultado CEST</th><th className="num">Confiança</th><th>Decisão</th><th className="actions-cell"><span className="sr-only">Decisão</span></th></tr></thead>
                 <tbody>
-                  {filteredItems.map((item) => <AuditRow
+                  {visibleItems.map((item) => <AuditRow
                     key={item.id}
                     item={item}
                     pending={pending[item.id]}
@@ -863,6 +912,13 @@ export default function Dashboard() {
                   />)}
                 </tbody>
               </table>
+              {hiddenCount > 0 ? <div className="list-more">
+                <span>Mostrando {visibleItems.length} de {filteredItems.length} itens</span>
+                <button type="button" className="button button-ghost" onClick={() => setVisibleCount((value) => value + PAGE_SIZE)}>
+                  Mostrar mais {Math.min(PAGE_SIZE, hiddenCount)}
+                </button>
+                <button type="button" className="button button-ghost" onClick={() => setVisibleCount(filteredItems.length)}>Mostrar todos</button>
+              </div> : null}
               {!filteredItems.length ? <EmptyState
                 icon={<Search size={20} />}
                 title={filter === "review" && !query ? "Nada aguardando revisão" : "Nenhum item encontrado"}

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -32,6 +33,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# A auditoria completa vem com todos os itens e evidências; comprimida, chega bem mais rápido.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(audit.router)
