@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.api import audit, auth
+from app.api import audit, auth, confirmed_codes
 from app.api.dependencies import get_db
 from app.core.config import settings
 from app.db.session import configure_database
@@ -39,6 +39,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(audit.router)
+app.include_router(confirmed_codes.router)
 
 
 @app.exception_handler(SpreadsheetValidationError)

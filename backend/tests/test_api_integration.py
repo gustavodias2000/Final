@@ -15,7 +15,7 @@ from openpyxl import Workbook
 from app.api.dependencies import get_db
 from app.core.login_throttle import login_throttle
 from app.core.security import hash_password
-from app.db.models import Audit, AuditInputItem, AuditItem, Tenant, User
+from app.db.models import NCM, Audit, AuditInputItem, AuditItem, ConfirmedClassification, NcmReferenceVersion, Tenant, User
 from app.db.session import Base
 from app.main import app
 
@@ -253,6 +253,100 @@ class ApiIntegrationTests(unittest.TestCase):
         finally:
             db.close()
         return f"/api/v1/audits/{self.audit_a.id}/items/{self.item_a.id}/review"
+
+    def _seed_ncm_table(self, *codes: str) -> None:
+        db = self.Session()
+        try:
+            version = NcmReferenceVersion(id=uuid4(), source_url="https://example.test/ncm", version=f"v-{uuid4()}",
+                                          fetched_at=datetime(2026, 11, 1, tzinfo=timezone.utc))
+            db.add(version)
+            db.flush()
+            db.add_all([NCM(id=uuid4(), reference_version_id=version.id, codigo=code, descricao="Teste") for code in codes])
+            db.commit()
+        finally:
+            db.close()
+
+    def _confirmed_rows(self) -> list[ConfirmedClassification]:
+        db = self.Session()
+        try:
+            return db.query(ConfirmedClassification).order_by(ConfirmedClassification.descricao).all()
+        finally:
+            db.close()
+
+    def test_approving_a_chosen_ncm_records_it_as_a_confirmed_code(self) -> None:
+        self._seed_ncm_table("19012090", "19012010", "01012100")
+        db = self.Session()
+        try:
+            db.query(AuditItem).filter(AuditItem.id == self.item_a.id).update({
+                AuditItem.ncm_atual: "19012000", AuditItem.ncm_sugerido: None, AuditItem.ncm_status: "invalid",
+                AuditItem.status: "pending_review",
+                AuditItem.ncm_opcoes: [{"ncm": "19012010", "descricao": "Massa"}, {"ncm": "19012090", "descricao": "Outras"}],
+            })
+            db.commit()
+        finally:
+            db.close()
+        headers = self._headers_for("auditor-a")
+        endpoint = f"/api/v1/audits/{self.audit_a.id}/items/{self.item_a.id}/review"
+
+        outside = self.client.post(endpoint, headers=headers, json={"decision": "approved", "ncm_escolhido": "01012100"})
+        with_rejection = self.client.post(endpoint, headers=headers, json={"decision": "rejected", "ncm_escolhido": "19012090"})
+        approved = self.client.post(endpoint, headers=headers, json={"decision": "approved", "ncm_escolhido": "19012090"})
+
+        self.assertEqual(outside.status_code, 422)
+        self.assertEqual(with_rejection.status_code, 422)
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(approved.json()["ncm_escolhido"], "19012090")
+        [confirmed] = self._confirmed_rows()
+        self.assertEqual((confirmed.codigo_produto, confirmed.ncm, confirmed.origem), ("SKU-1", "19012090", "aprovacao"))
+        self.assertEqual(confirmed.tenant_id, self.tenant_a.id)
+
+    def test_rejection_and_codes_missing_from_the_table_are_not_confirmed(self) -> None:
+        self._seed_ncm_table("09012100")
+        headers = self._headers_for("auditor-a")
+        endpoint = f"/api/v1/audits/{self.audit_a.id}/items/{self.item_a.id}/review"
+
+        # O NCM sugerido do item (0101.21.00) não está na tabela vigente semeada.
+        approved = self.client.post(endpoint, headers=headers, json={"decision": "approved"})
+
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(self._confirmed_rows(), [])
+
+    def test_confirmed_codes_can_be_imported_searched_and_removed_per_tenant(self) -> None:
+        self._seed_ncm_table("20096100", "19059090")
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["codigo_produto", "descricao", "ncm_atual", "cest_atual"])
+        worksheet.append(["7898953148220", "SUCO PRATS UVA 900ML", "2009.61.00", ""])
+        worksheet.append(["9051", "MANE PELADO E BOLOS DE PEDAÇO", "19059090", ""])
+        worksheet.append(["777", "PRODUTO COM NCM INEXISTENTE", "99999999", ""])
+        worksheet.append(["778", "PRODUTO SEM NCM", "", ""])
+        content = BytesIO()
+        workbook.save(content)
+        headers = self._headers_for("auditor-a")
+        xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+        imported = self.client.post("/api/v1/confirmed-codes/import", headers=headers,
+                                    files={"file": ("confirmados.xlsx", content.getvalue(), xlsx)})
+        again = self.client.post("/api/v1/confirmed-codes/import", headers=headers,
+                                 files={"file": ("confirmados.xlsx", content.getvalue(), xlsx)})
+        listed = self.client.get("/api/v1/confirmed-codes", headers=headers).json()
+        searched = self.client.get("/api/v1/confirmed-codes?q=prats", headers=headers).json()
+        by_ncm = self.client.get("/api/v1/confirmed-codes?q=1905.90", headers=headers).json()
+        other_tenant = self.client.get("/api/v1/confirmed-codes", headers=self._headers_for("auditor-b")).json()
+        removed_by_other = self.client.delete(f"/api/v1/confirmed-codes/{searched['data'][0]['id']}", headers=self._headers_for("auditor-b"))
+        removed = self.client.delete(f"/api/v1/confirmed-codes/{searched['data'][0]['id']}", headers=headers)
+
+        self.assertEqual(imported.status_code, 200)
+        self.assertEqual((imported.json()["importados"], imported.json()["atualizados"], imported.json()["ignorados"]), (2, 0, 2))
+        self.assertIn("não existe na tabela vigente", " ".join(imported.json()["motivos_ignorados"]))
+        self.assertEqual((again.json()["importados"], again.json()["atualizados"]), (0, 2))
+        self.assertEqual(listed["total"], 2)
+        self.assertEqual([entry["ncm"] for entry in searched["data"]], ["20096100"])
+        self.assertEqual([entry["codigo_produto"] for entry in by_ncm["data"]], ["9051"])
+        self.assertEqual(other_tenant["total"], 0)
+        self.assertEqual(removed_by_other.status_code, 404)
+        self.assertEqual(removed.status_code, 204)
+        self.assertEqual(len(self._confirmed_rows()), 1)
 
     def test_approval_records_the_chosen_cest_among_eligible_options(self) -> None:
         endpoint = self._set_cest_candidates()

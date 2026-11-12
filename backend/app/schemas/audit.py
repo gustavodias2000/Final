@@ -59,6 +59,17 @@ class AuditItemResponse(BaseModel):
     reference_attempts: list[dict[str, object]] = Field(default_factory=list)
     cest_candidates: list[CestCandidate] = Field(default_factory=list)
     cest_escolhido: str | None = Field(default=None, description="CEST escolhido na revisão entre as opções")
+    ncm_status: str | None = Field(default=None, description="valid, invalid ou missing; vazio em auditorias antigas")
+    ncm_fonte: str | None = Field(default=None, description="catalogo ou tabela: de onde veio a sugestão de NCM")
+    ncm_vizinhos: list[dict[str, object]] = Field(
+        default_factory=list,
+        description="Produtos parecidos do mesmo cadastro usados como evidência",
+    )
+    ncm_opcoes: list[dict[str, object]] = Field(
+        default_factory=list,
+        description="NCM extinto: códigos vigentes da mesma subposição, para escolha na revisão",
+    )
+    ncm_escolhido: str | None = Field(default=None, description="NCM escolhido na revisão entre as opções")
 
 
 class AuditItemReviewRequest(BaseModel):
@@ -66,6 +77,10 @@ class AuditItemReviewRequest(BaseModel):
     cest_escolhido: str | None = Field(
         default=None,
         description="Somente na aprovação: um dos CESTs listados em cest_candidates.",
+    )
+    ncm_escolhido: str | None = Field(
+        default=None,
+        description="Somente na aprovação: um dos NCMs listados em ncm_opcoes (NCM extinto).",
     )
 
 

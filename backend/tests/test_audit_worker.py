@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 import unittest
 from uuid import uuid4
 
@@ -550,6 +551,43 @@ class AuditWorkerTests(unittest.TestCase):
             self.assertEqual(item.cest_candidates[0]["score"], 100.0)
         finally:
             db.close()
+
+    def test_worker_persists_ncm_validity_and_suggests_for_an_invalid_ncm(self) -> None:
+        audit = self._create_audit(ncm_atual="99999999")
+
+        worker = AuditWorker(self.Session, worker_id="worker-ncm-invalido", lease_seconds=60, max_attempts=3)
+        self.assertTrue(worker.process_next())
+
+        db = self.Session()
+        try:
+            item = db.query(AuditItem).filter(AuditItem.audit_id == audit.id).one()
+            self.assertEqual(item.ncm_status, "invalid")
+            self.assertEqual(item.ncm_atual, "99999999")
+            self.assertEqual(item.ncm_sugerido, "01012100")
+            self.assertEqual(item.ncm_fonte, "tabela")
+            self.assertEqual(item.ncm_vizinhos, [])
+            self.assertIn("9999.99.99 não existe na tabela NCM vigente", item.motivo)
+        finally:
+            db.close()
+
+    def test_cest_missing_from_a_complete_catalog_is_flagged_as_nonexistent(self) -> None:
+        version = SimpleNamespace(source_url="https://example.test/catalogo-cest", version="sha256:completo")
+        complete = {f"{code:04d}": ((f"{code // 1000:02d}.{code % 1000:03d}.00", "Regra"),) for code in range(1, 601)}
+        partial = {"0101": (("01.001.00", "Regra"),)}
+
+        def result(cest: str) -> dict[str, object]:
+            return {"ncm_atual": "01012100", "ncm_sugerido": None, "cest_atual": cest, "status": "no_suggestion",
+                    "motivo": "Teste.", "descricao": "Produto"}
+
+        fake, real, with_partial_catalog = result("99.999.99"), result("00.005.00"), result("99.999.99")
+        AuditWorker._enrich_cest_catalog_results([fake, real], complete, version)
+        AuditWorker._enrich_cest_catalog_results([with_partial_catalog], partial, version)
+
+        self.assertEqual(fake["cest_status"], "catalog_cest_invalid")
+        self.assertEqual(fake["status"], "pending_review")
+        self.assertIn("99.999.99 não existe no catálogo CEST vigente", fake["motivo"])
+        self.assertNotEqual(real["cest_status"], "catalog_cest_invalid")
+        self.assertNotEqual(with_partial_catalog["cest_status"], "catalog_cest_invalid")
 
     def test_worker_queues_ambiguous_cest_options_for_human_choice(self) -> None:
         audit = self._create_audit(ncm_atual="01012100")

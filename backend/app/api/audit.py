@@ -19,7 +19,10 @@ from app.schemas.audit import (
     AuditUploadResponse,
     ReviewDecision,
 )
+from app.services.confirmed_codes import ORIGIN_APPROVAL
+from app.services.confirmed_store import ConfirmedInput, ncm_exists, upsert_confirmed
 from app.services.excel_parser import parse_excel
+from app.services.ncm_matcher import normalize_ncm
 
 router = APIRouter(prefix="/api/v1/audits", tags=["Auditorias"])
 INPUT_INSERT_BATCH_SIZE = 500
@@ -172,12 +175,46 @@ def review_audit_item(
             )
         item.cest_escolhido = request.cest_escolhido
 
+    if request.ncm_escolhido is not None:
+        if request.decision is not ReviewDecision.APPROVED:
+            raise HTTPException(status_code=422, detail="Um NCM só pode ser escolhido ao aprovar o item.")
+        options = {option.get("ncm") for option in item.ncm_opcoes or []}
+        if request.ncm_escolhido not in options:
+            raise HTTPException(
+                status_code=422,
+                detail="O NCM escolhido não está entre as opções da subposição para este item.",
+            )
+        item.ncm_escolhido = request.ncm_escolhido
+
     item.status = request.decision.value
     item.reviewed_by_user_id = current_user.id
     item.reviewed_at = datetime.now(timezone.utc)
+    if request.decision is ReviewDecision.APPROVED:
+        _remember_approved_classification(db, current_user, item)
     db.commit()
     db.refresh(item)
     return _to_item_response(item)
+
+
+def _remember_approved_classification(db: Session, user: User, item: AuditItem) -> None:
+    """Guarda o NCM aprovado como código confirmado, para as próximas auditorias da empresa."""
+    if item.ncm_escolhido or item.ncm_sugerido:
+        ncm = item.ncm_escolhido or item.ncm_sugerido
+    elif item.ncm_status in (None, "valid"):
+        ncm = item.ncm_atual
+    else:
+        return
+    ncm = normalize_ncm(ncm)
+    if not ncm or not ncm_exists(db, ncm):
+        return
+    cest = item.cest_escolhido or item.cest_sugerido or item.cest_atual
+    upsert_confirmed(
+        db,
+        user.tenant_id,
+        [ConfirmedInput(item.codigo_produto, item.descricao, ncm, cest)],
+        ORIGIN_APPROVAL,
+        user.id,
+    )
 
 
 def _get_tenant_audit(db: Session, audit_id: UUID, tenant_id: UUID) -> Audit:
@@ -226,4 +263,9 @@ def _to_item_response(item: AuditItem) -> AuditItemResponse:
         reference_attempts=item.reference_attempts or [],
         cest_candidates=item.cest_candidates or [],
         cest_escolhido=item.cest_escolhido,
+        ncm_status=item.ncm_status,
+        ncm_fonte=item.ncm_fonte,
+        ncm_vizinhos=item.ncm_vizinhos or [],
+        ncm_opcoes=item.ncm_opcoes or [],
+        ncm_escolhido=item.ncm_escolhido,
     )

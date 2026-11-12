@@ -16,6 +16,42 @@ export interface ReferenceAttempt {
   detail: string | null;
 }
 
+export interface NcmOption {
+  ncm: string;
+  descricao: string | null;
+}
+
+// NCM confirmado pela empresa: aprovado numa revisão ou importado por planilha.
+export interface ConfirmedCode {
+  id: string;
+  codigo_produto: string | null;
+  descricao: string;
+  ncm: string;
+  cest: string | null;
+  origem: "aprovacao" | "importacao";
+  atualizado_em: string;
+}
+
+export interface ConfirmedCodeList {
+  total: number;
+  data: ConfirmedCode[];
+}
+
+export interface ConfirmedCodeImportResult {
+  importados: number;
+  atualizados: number;
+  ignorados: number;
+  motivos_ignorados: string[];
+}
+
+// Produto parecido do mesmo cadastro, usado como evidência da sugestão de NCM.
+export interface CatalogNeighbor {
+  codigo_produto: string;
+  descricao: string;
+  ncm: string;
+  score: number;
+}
+
 export interface CestCandidate {
   cest: string;
   descricao: string | null;
@@ -41,6 +77,14 @@ export interface AuditItem {
   reference_attempts: ReferenceAttempt[];
   cest_candidates: CestCandidate[];
   cest_escolhido: string | null;
+  // Se o NCM informado existe na tabela vigente; vazio em auditorias antigas.
+  ncm_status?: "valid" | "invalid" | "missing" | null;
+  // De onde veio a sugestão de NCM: produtos parecidos do cadastro ou tabela oficial.
+  ncm_fonte?: "catalogo" | "tabela" | "confirmado" | null;
+  ncm_vizinhos?: CatalogNeighbor[];
+  // NCM extinto: códigos vigentes da mesma subposição, para escolha na revisão.
+  ncm_opcoes?: NcmOption[];
+  ncm_escolhido?: string | null;
 }
 
 export interface AuditSummary {

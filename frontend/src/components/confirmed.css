@@ -1,0 +1,31 @@
+/* ---------- Códigos confirmados ---------- */
+.confirmed-intro { padding: 14px 16px; display: grid; gap: 12px; border-bottom: 1px solid var(--line-soft); }
+.confirmed-intro > p { max-width: 82ch; margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.confirmed-intro .notice { margin-top: 0; }
+.confirmed-import { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; color: var(--ink-3); font-size: 12.5px; }
+.confirmed-import .template-download { display: inline-flex; vertical-align: baseline; }
+.confirmed-skipped { margin-top: 6px; color: var(--ink-2); }
+.confirmed-skipped summary { cursor: pointer; color: var(--accent); font-weight: 560; }
+.confirmed-skipped ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; }
+.confirmed-search { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); }
+.confirmed-search .search-field { width: min(100%, 360px); }
+.confirmed-item {
+  padding: 10px 12px 10px 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7.5em 6.5em auto;
+  align-items: center;
+  gap: 6px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.confirmed-item:first-child { border-top: 0; }
+.confirmed-code { display: grid; gap: 1px; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.confirmed-code small { color: var(--ink-3); font-family: var(--font-sans); font-size: 11px; font-weight: 560; }
+.confirmed-more { margin: 0; padding: 10px 16px 14px; color: var(--ink-3); font-size: 12.5px; }
+
+@media (max-width: 720px) {
+  .confirmed-item { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "main remove" "ncm cest"; align-items: start; }
+  .confirmed-item .history-main { grid-area: main; }
+  .confirmed-item .confirmed-code:nth-of-type(1) { grid-area: ncm; }
+  .confirmed-item .confirmed-code:nth-of-type(2) { grid-area: cest; }
+  .confirmed-item > button { grid-area: remove; }
+}

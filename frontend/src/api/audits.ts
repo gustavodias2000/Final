@@ -38,10 +38,15 @@ export async function reviewAuditItem(
   itemId: string,
   decision: ReviewDecision,
   cestEscolhido?: string,
+  ncmEscolhido?: string,
 ): Promise<AuditItem> {
   const { data } = await api.post<AuditItem>(
     `/api/v1/audits/${auditId}/items/${itemId}/review`,
-    cestEscolhido ? { decision, cest_escolhido: cestEscolhido } : { decision },
+    {
+      decision,
+      ...(cestEscolhido ? { cest_escolhido: cestEscolhido } : {}),
+      ...(ncmEscolhido ? { ncm_escolhido: ncmEscolhido } : {}),
+    },
   );
   return data;
 }

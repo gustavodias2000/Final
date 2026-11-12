@@ -3,6 +3,7 @@ import axios from "axios";
 import { strToU8, zipSync } from "fflate";
 import {
   AlertTriangle,
+  BadgeCheck,
   ArrowRight,
   Check,
   ChevronRight,
@@ -28,8 +29,9 @@ import { ThemeToggle } from "../theme";
 import { useConfirm } from "../components/ConfirmDialog";
 import { MenuButton } from "../components/MenuButton";
 import { AuditHistory } from "../components/AuditHistory";
+import { ConfirmedCodes } from "../components/ConfirmedCodes";
 
-type Filter = "all" | "review" | "cest_alert" | "approved" | "rejected" | "no_suggestion";
+type Filter = "all" | "review" | "ncm_alert" | "cest_alert" | "approved" | "rejected" | "no_suggestion";
 
 // A API recusa (409) uma segunda revisão do mesmo item; a decisão fica retida
 // no navegador por alguns segundos para que um clique errado possa ser desfeito.
@@ -56,6 +58,7 @@ const CEST_ALERT_STATUSES = new Set([
   "catalog_no_cest_for_ncm",
   "catalog_multiple",
   "catalog_not_found",
+  "catalog_cest_invalid",
 ]);
 
 function uploadErrorMessage(error: unknown): string {
@@ -103,6 +106,7 @@ const runMeta: Record<AuditStatus, string> = {
 const tiles: { key: Filter; label: string; tone: string }[] = [
   { key: "all", label: "Produtos", tone: "" },
   { key: "review", label: "Aguardando revisão", tone: "warning" },
+  { key: "ncm_alert", label: "NCM inexistente", tone: "danger" },
   { key: "cest_alert", label: "Alertas de CEST", tone: "danger" },
   { key: "approved", label: "Aprovados", tone: "success" },
   { key: "rejected", label: "Rejeitados", tone: "danger" },
@@ -147,6 +151,26 @@ function finalCest(item: AuditItem) {
 }
 
 // Item com várias opções de CEST e nenhuma sugestão: a aprovação exige escolher uma.
+// NCM informado não existe na tabela vigente (ou falta).
+function hasNcmAlert(item: AuditItem) {
+  return item.ncm_status === "invalid" || item.ncm_status === "missing";
+}
+
+// NCM inexistente e nenhuma sugestão: não há o que aprovar; a correção é no cadastro de origem.
+function needsNcmFix(item: AuditItem) {
+  return needsReview(item) && hasNcmAlert(item) && !item.ncm_sugerido && !(item.ncm_opcoes?.length);
+}
+
+// NCM extinto com vários códigos atuais na subposição: a aprovação exige escolher um.
+function needsNcmChoice(item: AuditItem) {
+  return needsReview(item) && !item.ncm_sugerido && (item.ncm_opcoes?.length ?? 0) > 0;
+}
+
+// O NCM que vale para o item: o escolhido na revisão ou, sem escolha, o sugerido.
+function finalNcm(item: AuditItem) {
+  return item.ncm_escolhido ?? item.ncm_sugerido;
+}
+
 function needsCestChoice(item: AuditItem) {
   return needsReview(item) && !item.cest_atual && !item.cest_sugerido && cestOptions(item).length > 1;
 }
@@ -166,7 +190,7 @@ function cestOptionsSummary(item: AuditItem) {
 function hasSuggestedClassificationChange(item: AuditItem) {
   const cest = finalCest(item);
   return (
-    Boolean(item.ncm_sugerido && item.ncm_sugerido !== item.ncm_atual)
+    Boolean(finalNcm(item) && finalNcm(item) !== item.ncm_atual)
     || Boolean(cest && cest !== item.cest_atual)
   );
 }
@@ -179,6 +203,7 @@ function matchesFilter(item: AuditItem, filter: Filter) {
   if (filter === "all") return true;
   if (filter === "review") return needsReview(item);
   if (filter === "cest_alert") return hasCestAlert(item);
+  if (filter === "ncm_alert") return hasNcmAlert(item);
   return item.status === filter;
 }
 
@@ -198,6 +223,21 @@ function byUrgency(a: AuditItem, b: AuditItem) {
 type ClassificationResult = { label: string; tone: "success" | "warning" | "danger" | "neutral" | "info" };
 
 function ncmResult(item: AuditItem): ClassificationResult {
+  if (item.ncm_escolhido) return { label: "Escolhido na revisão", tone: "success" };
+  // Sugestão vinda de um código confirmado: a origem pesa mais que o problema do NCM da planilha.
+  if (item.ncm_fonte === "confirmado" && item.ncm_sugerido) {
+    return item.ncm_status === "valid"
+      ? { label: "Diferente do código confirmado", tone: "warning" }
+      : { label: "Código confirmado", tone: "info" };
+  }
+  if (item.ncm_status === "invalid") return { label: "Inexistente", tone: "danger" };
+  if (item.ncm_status === "missing") return { label: "Não informado", tone: "danger" };
+  if (item.ncm_fonte === "confirmado") {
+    return item.ncm_sugerido
+      ? { label: "Diferente do código confirmado", tone: "warning" }
+      : { label: "Confirmado anteriormente", tone: "success" };
+  }
+  if (item.ncm_sugerido && item.ncm_fonte === "catalogo") return { label: "Diferente de produtos parecidos", tone: "warning" };
   return item.ncm_sugerido
     ? { label: "Alteração sugerida", tone: "warning" }
     : { label: "Sem alteração sugerida", tone: "neutral" };
@@ -221,6 +261,8 @@ function cestResult(item: AuditItem): ClassificationResult {
       return { label: "Sem CEST elegível: revisar", tone: "danger" };
     case "catalog_not_found":
       return { label: "NCM fora do catálogo", tone: "neutral" };
+    case "catalog_cest_invalid":
+      return { label: "CEST inexistente", tone: "danger" };
     case "catalog_multiple":
       return { label: "Escolha entre as opções", tone: "warning" };
     case "catalog_ranked":
@@ -257,11 +299,13 @@ export default function Dashboard() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
+  const [showConfirmed, setShowConfirmed] = useState(false);
   const [openingAuditId, setOpeningAuditId] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [announcement, setAnnouncement] = useState("");
   const auditRef = useRef(audit);
-  const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision; cest?: string }>());
+  const timers = useRef(new Map<string, { timer: number; item: AuditItem; decision: ReviewDecision; cest?: string; ncm?: string }>());
+  const [ncmChoices, setNcmChoices] = useState<Record<string, string>>({});
   auditRef.current = audit;
   const [confirm, confirmDialog] = useConfirm();
 
@@ -334,6 +378,7 @@ export default function Dashboard() {
     return {
       all: items.length,
       review: items.filter(needsReview).length,
+      ncm_alert: items.filter(hasNcmAlert).length,
       cest_alert: items.filter(hasCestAlert).length,
       approved: items.filter((item) => item.status === "approved").length,
       rejected: items.filter((item) => item.status === "rejected").length,
@@ -517,9 +562,9 @@ export default function Dashboard() {
 
   async function flushPending() {
     const queued = [...timers.current.values()];
-    await Promise.all(queued.map(({ timer, item, decision, cest }) => {
+    await Promise.all(queued.map(({ timer, item, decision, cest, ncm }) => {
       window.clearTimeout(timer);
-      return commitDecision(item, decision, cest);
+      return commitDecision(item, decision, cest, ncm);
     }));
   }
 
@@ -594,7 +639,7 @@ export default function Dashboard() {
     });
   }
 
-  async function commitDecision(item: AuditItem, decision: ReviewDecision, cest?: string) {
+  async function commitDecision(item: AuditItem, decision: ReviewDecision, cest?: string, ncm?: string) {
     const current = auditRef.current;
     if (!current) return;
     // Captura o foco antes de a linha mudar, para devolvê-lo à próxima pendência.
@@ -614,7 +659,7 @@ export default function Dashboard() {
     });
     setBusyIds((value) => new Set(value).add(item.id));
     try {
-      const updated = await reviewAuditItem(current.audit_id, item.id, decision, cest);
+      const updated = await reviewAuditItem(current.audit_id, item.id, decision, cest, ncm);
       setAudit((value) => value ? {
         ...value,
         data: value.data.map((candidate) => candidate.id === item.id ? updated : candidate),
@@ -636,6 +681,14 @@ export default function Dashboard() {
     return cestChoices[item.id] ?? defaultCestChoice(item);
   }
 
+  function ncmChoiceFor(item: AuditItem) {
+    return ncmChoices[item.id];
+  }
+
+  function chooseNcm(item: AuditItem, ncm: string) {
+    setNcmChoices((value) => ({ ...value, [item.id]: ncm }));
+  }
+
   function chooseCest(item: AuditItem, cest: string) {
     setCestChoices((value) => ({ ...value, [item.id]: cest }));
   }
@@ -643,14 +696,24 @@ export default function Dashboard() {
   function decide(item: AuditItem, decision: ReviewDecision) {
     if (timers.current.has(item.id)) return;
     const cest = decision === "approved" ? cestChoiceFor(item) : undefined;
+    const ncm = decision === "approved" ? ncmChoiceFor(item) : undefined;
+    if (decision === "approved" && needsNcmChoice(item) && !ncm) {
+      setError(`Escolha um dos NCMs de "${item.descricao}" antes de aprovar.`);
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`${rowSelector(item.id)} .ncm-options input`)?.focus());
+      return;
+    }
+    if (decision === "approved" && needsNcmFix(item)) {
+      setError(`"${item.descricao}" não tem NCM sugerido para aprovar. Corrija o NCM no cadastro de origem ou rejeite o item.`);
+      return;
+    }
     if (decision === "approved" && needsCestChoice(item) && !cest) {
       setError(`Escolha um dos CESTs de "${item.descricao}" antes de aprovar.`);
       requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`${rowSelector(item.id)} .cest-option input`)?.focus());
       return;
     }
     setError(null);
-    const timer = window.setTimeout(() => commitDecision(item, decision, cest), UNDO_MS);
-    timers.current.set(item.id, { timer, item, decision, cest });
+    const timer = window.setTimeout(() => commitDecision(item, decision, cest, ncm), UNDO_MS);
+    timers.current.set(item.id, { timer, item, decision, cest, ncm });
     setPending((value) => ({ ...value, [item.id]: decision }));
     setAnnouncement(`${item.descricao} será ${decisionMeta[decision].done} em 5 segundos. Use Desfazer para cancelar.`);
     requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`${rowSelector(item.id)} .undo-btn`)?.focus());
@@ -678,19 +741,25 @@ export default function Dashboard() {
       return;
     }
     const action = decision === "approved" ? "aprovar" : "rejeitar";
-    // Na aprovação em lote, itens que exigem escolha de CEST sem escolha feita ficam de fora.
-    const targets = decision === "approved"
-      ? reviewableItems.filter((item) => !needsCestChoice(item) || cestChoiceFor(item))
-      : reviewableItems;
-    const skipped = reviewableItems.length - targets.length;
+    // Na aprovação em lote ficam de fora os itens sem NCM para aprovar e os que exigem
+    // escolha de CEST sem escolha feita.
+    const withoutNcm = decision === "approved" ? reviewableItems.filter(needsNcmFix) : [];
+    const withoutCestChoice = decision === "approved"
+      ? reviewableItems.filter((item) => !needsNcmFix(item) && (
+        (needsCestChoice(item) && !cestChoiceFor(item)) || (needsNcmChoice(item) && !ncmChoiceFor(item))
+      ))
+      : [];
+    const targets = reviewableItems.filter((item) => !withoutNcm.includes(item) && !withoutCestChoice.includes(item));
     if (!targets.length) {
-      setError("Todos os itens pendentes exigem a escolha de um CEST. Escolha nas linhas antes de aprovar.");
+      setError("Nenhum item pendente pode ser aprovado em lote: falta escolher o CEST ou corrigir o NCM no cadastro.");
       return;
     }
     const count = targets.length;
-    const skippedNote = skipped
-      ? ` ${skipped} ${skipped === 1 ? "item ficará" : "itens ficarão"} de fora porque ${skipped === 1 ? "exige" : "exigem"} a escolha de um CEST.`
-      : "";
+    const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+    const skippedNote = [
+      withoutNcm.length ? `${plural(withoutNcm.length, "item fica", "itens ficam")} de fora por não ter NCM sugerido.` : "",
+      withoutCestChoice.length ? `${plural(withoutCestChoice.length, "item fica", "itens ficam")} de fora por exigir a escolha de um NCM ou CEST.` : "",
+    ].filter(Boolean).join(" ");
     if (!(await confirm({
       title: `Deseja ${action} ${count === 1 ? "1 item pendente" : `os ${count} itens pendentes`}?`,
       message: `${skippedNote.trim()} Esta ação não poderá ser desfeita.`.trim(),
@@ -706,7 +775,8 @@ export default function Dashboard() {
     for (const item of targets) {
       try {
         const cest = decision === "approved" ? cestChoiceFor(item) : undefined;
-        const updated = await reviewAuditItem(current.audit_id, item.id, decision, cest);
+        const ncm = decision === "approved" ? ncmChoiceFor(item) : undefined;
+        const updated = await reviewAuditItem(current.audit_id, item.id, decision, cest, ncm);
         completed += 1;
         setAudit((value) => value ? {
           ...value,
@@ -727,9 +797,8 @@ export default function Dashboard() {
       setError(`${completed} itens foram ${decision === "approved" ? "aprovados" : "rejeitados"}; ${failed} não puderam ser atualizados. Recarregue a página antes de tentar novamente.`);
       return;
     }
-    const leftOut = skipped ? ` ${skipped} ${skipped === 1 ? "item aguarda" : "itens aguardam"} a escolha de um CEST.` : "";
-    setAnnouncement(`${completed} ${completed === 1 ? "item foi" : "itens foram"} ${decision === "approved" ? "aprovados" : "rejeitados"}.${leftOut}`);
-    if (skipped) setError(`${skipped} ${skipped === 1 ? "item não foi aprovado porque exige" : "itens não foram aprovados porque exigem"} a escolha de um CEST. Escolha nas linhas e aprove individualmente.`);
+    setAnnouncement(`${completed} ${completed === 1 ? "item foi" : "itens foram"} ${decision === "approved" ? "aprovados" : "rejeitados"}.${skippedNote ? ` ${skippedNote}` : ""}`);
+    if (skippedNote) setError(`${skippedNote} Resolva nas linhas e decida individualmente.`);
   }
 
   function downloadCsv(columns: string[], rows: string[][], filename: string) {
@@ -777,7 +846,7 @@ export default function Dashboard() {
       .map((item) => [
         item.codigo_produto,
         item.descricao,
-        proposedCode(item.ncm_atual, item.ncm_sugerido),
+        proposedCode(item.ncm_atual, finalNcm(item)),
         proposedCode(item.cest_atual, finalCest(item)),
       ]);
     downloadCsv(columns, rows, `auditoria-${audit.audit_id}-resumida.csv`);
@@ -852,7 +921,7 @@ export default function Dashboard() {
   function exportStyledSummaryResults() {
     if (!audit?.data.length) return;
     const columns = ["codigo_produto", "descricao", "NCM", "CEST"];
-    const rows = audit.data.filter(hasSuggestedClassificationChange).map((item) => [item.codigo_produto, item.descricao, proposedCode(item.ncm_atual, item.ncm_sugerido), proposedCode(item.cest_atual, finalCest(item))]);
+    const rows = audit.data.filter(hasSuggestedClassificationChange).map((item) => [item.codigo_produto, item.descricao, proposedCode(item.ncm_atual, finalNcm(item)), proposedCode(item.cest_atual, finalCest(item))]);
     downloadWorkbook(buildStyledWorkbook("Relatório resumido de alterações", "Somente produtos com alteração sugerida de NCM ou CEST.", columns, rows), `auditoria-${audit.audit_id}-resumida.xlsx`);
   }
 
@@ -879,14 +948,19 @@ export default function Dashboard() {
               : "Envie o cadastro de produtos, acompanhe a análise e decida item a item."}</p>
           </div>
           <div className="audit-page-actions">
-            <button className="button button-ghost" onClick={() => { setShowHistory((value) => !value); if (audit) setShowUpload(false); }} aria-expanded={showHistory}>
+            <button className="button button-ghost" onClick={() => { setShowConfirmed((value) => !value); setShowHistory(false); if (audit) setShowUpload(false); }} aria-expanded={showConfirmed}>
+              <BadgeCheck size={15} aria-hidden="true" /> Códigos confirmados
+            </button>
+            <button className="button button-ghost" onClick={() => { setShowHistory((value) => !value); setShowConfirmed(false); if (audit) setShowUpload(false); }} aria-expanded={showHistory}>
               <History size={15} aria-hidden="true" /> Histórico
             </button>
-            {audit ? <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setShowHistory(false); setFile(null); }} aria-expanded={showUpload}>
+            {audit ? <button className="button button-ghost" onClick={() => { setShowUpload((value) => !value); setShowHistory(false); setShowConfirmed(false); setFile(null); }} aria-expanded={showUpload}>
               {showUpload ? <><X size={15} aria-hidden="true" /> Cancelar</> : <><FileUp size={15} aria-hidden="true" /> Nova auditoria</>}
             </button> : null}
           </div>
         </div>
+
+        {showConfirmed ? <ConfirmedCodes confirm={confirm} onClose={() => setShowConfirmed(false)} /> : null}
 
         {showHistory ? <AuditHistory
           currentAuditId={audit?.audit_id ?? null}
@@ -1038,6 +1112,8 @@ export default function Dashboard() {
                     open={openId === item.id}
                     cestChoice={pending[item.id] ? timers.current.get(item.id)?.cest : cestChoiceFor(item)}
                     onChooseCest={chooseCest}
+                    ncmChoice={pending[item.id] ? timers.current.get(item.id)?.ncm : ncmChoiceFor(item)}
+                    onChooseNcm={chooseNcm}
                     onToggle={() => setOpenId((current) => current === item.id ? null : item.id)}
                     onDecide={decide}
                     onUndo={undo}
@@ -1070,13 +1146,15 @@ export default function Dashboard() {
   );
 }
 
-function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggle, onDecide, onUndo }: {
+function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, ncmChoice, onChooseNcm, onToggle, onDecide, onUndo }: {
   item: AuditItem;
   pending: ReviewDecision | undefined;
   busy: boolean;
   open: boolean;
   cestChoice: string | undefined;
   onChooseCest: (item: AuditItem, cest: string) => void;
+  ncmChoice: string | undefined;
+  onChooseNcm: (item: AuditItem, ncm: string) => void;
   onToggle: () => void;
   onDecide: (item: AuditItem, decision: ReviewDecision) => void;
   onUndo: (item: AuditItem) => void;
@@ -1088,14 +1166,17 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
   const decided = item.status === "approved" || item.status === "rejected";
   const options = cestOptions(item);
   const choiceRequired = needsCestChoice(item);
-  const choiceMissing = choiceRequired && !cestChoice;
+  const ncmFixNeeded = needsNcmFix(item);
+  const ncmChoiceMissing = needsNcmChoice(item) && !ncmChoice;
+  const choiceMissing = (choiceRequired && !cestChoice) || ncmFixNeeded || ncmChoiceMissing;
+  const displayedNcm = item.ncm_escolhido ?? (pending === "approved" && ncmChoice ? ncmChoice : item.ncm_sugerido);
   const choiceHintId = `cest-hint-${item.id}`;
   const displayedCest = item.cest_escolhido ?? (pending === "approved" && cestChoice ? cestChoice : item.cest_sugerido);
   const cestBadge: ClassificationResult = item.cest_escolhido
     ? { label: "Escolhido na revisão", tone: "success" }
     : cestClassification;
   const reason = reasonSummary(item.motivo);
-  const hasEvidence = reason.shortened || Boolean(item.fonte_referencia || item.cest_status || item.cest_evidence || item.cest_source_url || item.reference_attempts?.length);
+  const hasEvidence = reason.shortened || Boolean(item.ncm_vizinhos?.length || item.ncm_fonte || item.fonte_referencia || item.cest_status || item.cest_evidence || item.cest_source_url || item.reference_attempts?.length);
   const detailId = `evidence-${item.id}`;
   const rowClass = ["row", open && "row-open", decided && "row-decided", pending && `row-pending row-pending-${pending}`].filter(Boolean).join(" ");
 
@@ -1112,10 +1193,16 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
       </td>
       <td className="cell-ncm" data-label="NCM">
         <div className="classification">
-          <CodeChange label="NCM" current={item.ncm_atual} suggested={item.ncm_sugerido} groups={NCM_GROUPS} empty="Sem NCM informado" />
+          <CodeChange label="NCM" current={item.ncm_atual} suggested={displayedNcm} groups={NCM_GROUPS} empty="Sem NCM informado" />
           <span className={`badge ${ncmClassification.tone}`}>NCM: {ncmClassification.label}</span>
         </div>
         {reason.text ? <span className="reason">{reason.text}</span> : null}
+        {item.ncm_opcoes?.length ? <NcmOptions
+          item={item}
+          selected={decided ? item.ncm_escolhido ?? undefined : canReview ? ncmChoice : undefined}
+          editable={canReview && !pending && !busy && !item.ncm_sugerido}
+          onChoose={(ncm) => onChooseNcm(item, ncm)}
+        /> : null}
       </td>
       <td className="cell-cest" data-label="CEST">
         <div className="classification">
@@ -1150,7 +1237,7 @@ function AuditRow({ item, pending, busy, open, cestChoice, onChooseCest, onToggl
             <X size={14} aria-hidden="true" /> Rejeitar
           </button>
         </div>
-        {choiceMissing ? <p className="choice-hint" id={choiceHintId}>Escolha um CEST para aprovar</p> : null}
+        {choiceMissing ? <p className="choice-hint" id={choiceHintId}>{ncmFixNeeded ? "Sem NCM para aprovar: corrija no cadastro" : ncmChoiceMissing ? "Escolha um NCM para aprovar" : "Escolha um CEST para aprovar"}</p> : null}
         </> : null}
       </td>
     </tr>
@@ -1189,6 +1276,29 @@ function CestOptions({ item, options, selected, editable, required, onChoose }: 
         />
         <span className="cest-option-code">{formatCode(option.cest, CEST_GROUPS)}</span>
         {scoreLabel ? <span className="cest-option-score" aria-label={`similaridade ${scoreLabel}`}>{scoreLabel}</span> : null}
+        {option.descricao ? <span className="cest-option-desc">{option.descricao}</span> : null}
+      </label>;
+    })}
+  </fieldset>;
+}
+
+// NCM extinto: códigos atuais da mesma subposição. Enquanto o item aguarda revisão, viram
+// uma escolha obrigatória para aprovar; depois, ficam como registro da opção escolhida.
+function NcmOptions({ item, selected, editable, onChoose }: {
+  item: AuditItem;
+  selected: string | undefined;
+  editable: boolean;
+  onChoose: (ncm: string) => void;
+}) {
+  const options = item.ncm_opcoes ?? [];
+  const chosen = item.ncm_escolhido ?? selected;
+  return <fieldset className={`cest-options ncm-options${editable ? " cest-options-editable" : ""}`} disabled={!editable}>
+    <legend>{editable ? "Escolha o NCM atual" : `${options.length} opções de NCM`}</legend>
+    {options.map((option) => {
+      const isChosen = option.ncm === chosen;
+      return <label key={option.ncm} className={`cest-option${isChosen ? " cest-option-chosen" : ""}`}>
+        <input type="radio" name={`ncm-${item.id}`} value={option.ncm} checked={isChosen} onChange={() => onChoose(option.ncm)} />
+        <span className="cest-option-code">{formatCode(option.ncm, NCM_GROUPS)}</span>
         {option.descricao ? <span className="cest-option-desc">{option.descricao}</span> : null}
       </label>;
     })}
@@ -1255,8 +1365,18 @@ function Confidence({ score }: { score: number }) {
 
 function EvidencePanel({ item, fullReason }: { item: AuditItem; fullReason: boolean }) {
   const attempts = item.reference_attempts ?? [];
+  const neighbors = item.ncm_vizinhos ?? [];
   return <dl className="evidence">
     {fullReason ? <div className="evidence-reason"><dt>Motivo</dt><dd>{item.motivo}</dd></div> : null}
+    {item.ncm_fonte ? <div><dt>Fonte da sugestão de NCM</dt><dd>{item.ncm_fonte === "confirmado" ? "Código confirmado pela sua empresa" : item.ncm_fonte === "catalogo" ? "Produtos parecidos do seu cadastro" : "Tabela NCM oficial, pela semelhança da descrição"}</dd></div> : null}
+    {neighbors.length ? <div className="evidence-neighbors">
+      <dt>Produtos parecidos no cadastro</dt>
+      <dd><ul>{neighbors.map((neighbor) => <li key={`${neighbor.codigo_produto}-${neighbor.ncm}`}>
+        <span className="neighbor-desc">{neighbor.descricao}</span>
+        <span className="mono">{formatCode(neighbor.ncm, NCM_GROUPS)}</span>
+        <span className="neighbor-score" aria-label={`semelhança ${Math.round(neighbor.score)}%`}>{Math.round(neighbor.score)}%</span>
+      </li>)}</ul></dd>
+    </div> : null}
     {item.fonte_referencia ? <div><dt>Referência NCM</dt><dd>{item.fonte_referencia}{item.versao_referencia ? ` (${item.versao_referencia})` : ""}</dd></div> : null}
     {item.cest_status ? <div><dt>Status CEST</dt><dd>{formatCestStatus(item.cest_status)}</dd></div> : null}
     {item.cest_evidence ? <div><dt>Justificativa CEST</dt><dd>{item.cest_evidence}</dd></div> : null}
@@ -1279,6 +1399,7 @@ function formatCestStatus(status: string) {
     catalog_multiple: "Múltiplas opções para revisão",
     catalog_prefix_match: "Correspondência parcial; sem sugestão automática",
     catalog_not_found: "Não encontrado no catálogo",
+    catalog_cest_invalid: "CEST informado não existe no catálogo CEST vigente",
     external_found: "Encontrado em fonte externa",
   };
   return labels[status] ?? status;

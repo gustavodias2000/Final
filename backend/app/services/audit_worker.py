@@ -8,6 +8,7 @@ retomar o trabalho quando a lease expirar.
 from __future__ import annotations
 
 import os
+import re
 import socket
 import time
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from rapidfuzz import fuzz
 
 from app.core.config import settings
 from app.db.models import (
+    ConfirmedClassification,
     Audit,
     AuditInputItem,
     AuditItem,
@@ -29,6 +31,7 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal, configure_database
 from app.services.audit_engine import AuditEngine, AuditPolicy, ProductForAudit
+from app.services.confirmed_codes import ConfirmedCode
 from app.services.ncm_matcher import normalize_ncm, normalize_text
 from app.services.reference.cest_lookup import CestLookupClient, CestLookupResult
 from app.services.reference.fallback_lookup import (
@@ -43,6 +46,7 @@ from app.services.reference.fallback_lookup import (
 
 
 RESULT_INSERT_BATCH_SIZE = 500
+MIN_CESTS_FOR_EXISTENCE_CHECK = 500
 
 
 def _now() -> datetime:
@@ -171,6 +175,11 @@ class AuditWorker:
                 reference_source=reference_version.source_url,
                 reference_version=reference_version.version,
             )
+            tenant_id = db.query(Audit.tenant_id).filter(Audit.id == audit_id).scalar()
+            confirmed = [
+                ConfirmedCode(row.codigo_produto, row.descricao, row.ncm, row.origem)
+                for row in db.query(ConfirmedClassification).filter(ConfirmedClassification.tenant_id == tenant_id)
+            ]
             products = tuple(
                 ProductForAudit(
                     codigo_produto=item.codigo_produto,
@@ -180,7 +189,7 @@ class AuditWorker:
                 )
                 for item in inputs
             )
-            findings = AuditEngine(reference, policy).audit_products(
+            findings = AuditEngine(reference, policy, confirmed).audit_products(
                 products,
                 on_processed=lambda n: self._progress(audit_id, n),
                 progress_every=self.progress_batch_size,
@@ -369,6 +378,12 @@ class AuditWorker:
         version: CestReferenceVersion,
     ) -> None:
         """Usa regras CEST exatas ou por prefixo, sem sugerir por correspondência ampla."""
+        known_cests = {
+            re.sub(r"\D", "", cest) for rules in cest_rules.values() for cest, _ in rules
+        }
+        # Só dá para afirmar que um CEST não existe com o catálogo completo (o vigente tem ~1.000
+        # CESTs). Com um catálogo parcial, um CEST real seria marcado como inexistente.
+        catalog_is_complete = len(known_cests) >= MIN_CESTS_FOR_EXISTENCE_CHECK
         for result in results:
             ncm = normalize_ncm(result.get("ncm_sugerido") or result.get("ncm_atual"))
             if not ncm:
@@ -475,6 +490,19 @@ class AuditWorker:
                     "escolha uma na revisão."
                 )
 
+        for result in results:
+            current_cest = result.get("cest_atual")
+            if not catalog_is_complete or not current_cest or re.sub(r"\D", "", str(current_cest)) in known_cests:
+                continue
+            result["cest_status"] = "catalog_cest_invalid"
+            result["cest_source_url"] = version.source_url
+            result["cest_evidence"] = (
+                f"Catalogo CEST {version.version}: o CEST {current_cest} nao existe em nenhuma regra do catalogo."
+            )
+            result["motivo"] = f"{result['motivo']} CEST atual {current_cest} não existe no catálogo CEST vigente."
+            if result["status"] == "no_suggestion":
+                result["status"] = "pending_review"
+
     @staticmethod
     def _describe_cest_candidates(
         candidates: tuple[str, ...],
@@ -574,6 +602,10 @@ class AuditWorker:
                     "cest_evidence": result.get("cest_evidence"),
                     "reference_attempts": result.get("reference_attempts") or [],
                     "cest_candidates": result.get("cest_candidates") or [],
+                    "ncm_status": result.get("ncm_status"),
+                    "ncm_fonte": result.get("ncm_fonte"),
+                    "ncm_vizinhos": result.get("ncm_vizinhos") or [],
+                    "ncm_opcoes": result.get("ncm_opcoes") or [],
                 }
                 for result in results
             ]

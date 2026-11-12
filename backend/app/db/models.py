@@ -153,9 +153,45 @@ class AuditItem(Base):
     cest_candidates = Column(JSON, nullable=False, default=list)
     # CEST escolhido pela pessoa revisora entre as opções, no momento da aprovação.
     cest_escolhido = Column(String(10), nullable=True)
+    # valid / invalid / missing: se o NCM informado existe na tabela vigente.
+    ncm_status = Column(String(20), nullable=True)
+    # De onde veio a sugestão de NCM: catalogo (produtos parecidos) ou tabela (tabela oficial).
+    ncm_fonte = Column(String(20), nullable=True)
+    # Produtos parecidos do mesmo cadastro usados como evidência: descrição, código, NCM e nota.
+    ncm_vizinhos = Column(JSON, nullable=False, default=list)
+    # NCM extinto: códigos atuais da mesma subposição, para a pessoa escolher na revisão.
+    ncm_opcoes = Column(JSON, nullable=False, default=list)
+    # NCM escolhido pela pessoa revisora entre as opções, no momento da aprovação.
+    ncm_escolhido = Column(String(8), nullable=True)
     reviewed_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     audit = relationship("Audit", back_populates="items")
     reviewed_by = relationship("User")
+
+
+class ConfirmedClassification(Base):
+    """NCM (e CEST) confirmado pela empresa para um produto: aprovado na revisão ou importado.
+
+    Nas próximas auditorias é a evidência mais forte: primeiro pelo código do produto, depois
+    por descrição quase idêntica.
+    """
+
+    __tablename__ = "confirmed_classifications"
+    __table_args__ = (UniqueConstraint("tenant_id", "codigo_produto", name="uq_confirmed_tenant_codigo"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    # Código do produto ou EAN, como vem na planilha; vazio quando só a descrição identifica o item.
+    codigo_produto = Column(String(255), nullable=True)
+    descricao = Column(Text, nullable=False)
+    # Descrição normalizada (matching_text), para achar o mesmo produto sem código.
+    descricao_chave = Column(Text, nullable=False, index=True)
+    ncm = Column(String(8), nullable=False)
+    cest = Column(String(10), nullable=True)
+    # aprovacao (decisão na revisão) ou importacao (planilha de códigos confirmados).
+    origem = Column(String(20), nullable=False)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
