@@ -128,7 +128,9 @@ def _persist_input_items(db: Session, audit_id: UUID, products: tuple) -> None:
         for row_number, product in enumerate(products, start=1)
     ]
     for start in range(0, len(mappings), INPUT_INSERT_BATCH_SIZE):
-        db.bulk_insert_mappings(AuditInputItem, mappings[start : start + INPUT_INSERT_BATCH_SIZE])
+        # render_nulls: sem isso o SQLAlchemy separa o lote a cada linha com um campo vazio
+        # diferente, e cada pedaço vira uma ida ao banco (3.700 linhas viravam ~1.200 comandos).
+        db.bulk_insert_mappings(AuditInputItem, mappings[start : start + INPUT_INSERT_BATCH_SIZE], render_nulls=True)
 
 
 @router.get("/{audit_id}", response_model=AuditUploadResponse)

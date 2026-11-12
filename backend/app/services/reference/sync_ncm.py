@@ -53,6 +53,7 @@ def persist_catalog(
                 }
                 for entry in catalog.entries
             ],
+            render_nulls=True,
         )
         db.commit()
         return NcmSyncResult(version=version.version, entries=len(catalog.entries), created=True)

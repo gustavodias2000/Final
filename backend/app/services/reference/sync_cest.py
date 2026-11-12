@@ -47,6 +47,7 @@ def persist_catalog(catalog: CestCatalog, session_factory: sessionmaker = Sessio
                 }
                 for entry in catalog.entries
             ],
+            render_nulls=True,
         )
         db.commit()
         return CestSyncResult(version.version, len(catalog.entries), True)

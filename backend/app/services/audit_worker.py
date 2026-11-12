@@ -572,13 +572,15 @@ class AuditWorker:
                     "cest_status": result.get("cest_status"),
                     "cest_source_url": result.get("cest_source_url"),
                     "cest_evidence": result.get("cest_evidence"),
-                    "reference_attempts": result.get("reference_attempts", []),
-                    "cest_candidates": result.get("cest_candidates", []),
+                    "reference_attempts": result.get("reference_attempts") or [],
+                    "cest_candidates": result.get("cest_candidates") or [],
                 }
                 for result in results
             ]
             for start in range(0, len(mappings), RESULT_INSERT_BATCH_SIZE):
-                db.bulk_insert_mappings(AuditItem, mappings[start : start + RESULT_INSERT_BATCH_SIZE])
+                # render_nulls: sem isso o SQLAlchemy separa o lote a cada linha com um campo vazio
+                # diferente, e cada pedaço vira uma ida ao banco (3.700 linhas viravam ~1.200 comandos).
+                db.bulk_insert_mappings(AuditItem, mappings[start : start + RESULT_INSERT_BATCH_SIZE], render_nulls=True)
             audit.status = "completed"
             audit.processados = len(results)
             audit.completed_at = _now()

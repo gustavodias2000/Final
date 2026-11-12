@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from io import BytesIO
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -15,7 +15,7 @@ from openpyxl import Workbook
 from app.api.dependencies import get_db
 from app.core.login_throttle import login_throttle
 from app.core.security import hash_password
-from app.db.models import Audit, AuditItem, Tenant, User
+from app.db.models import Audit, AuditInputItem, AuditItem, Tenant, User
 from app.db.session import Base
 from app.main import app
 
@@ -325,6 +325,43 @@ class ApiIntegrationTests(unittest.TestCase):
         db = self.Session()
         try:
             self.assertEqual(db.query(Audit).count(), 1)
+        finally:
+            db.close()
+
+    def test_upload_saves_rows_in_a_few_batches_even_with_alternating_empty_cest(self) -> None:
+        # Cada comando é uma ida e volta da Render até o banco; com 1 comando por poucas linhas,
+        # uma planilha de 3.700 linhas passava de 90 s e o envio estourava o tempo do site.
+        headers = self._headers_for("auditor-a")
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["codigo_produto", "descricao", "ncm_atual", "cest_atual"])
+        for row in range(300):
+            worksheet.append([f"SKU-{row}", f"Produto {row}", "22021000", "0300700" if row % 2 else ""])
+        content = BytesIO()
+        workbook.save(content)
+        statements: list[str] = []
+
+        def record(_conn, _cursor, statement, *_args) -> None:
+            statements.append(statement)
+
+        event.listen(self.engine, "before_cursor_execute", record)
+        try:
+            response = self.client.post(
+                "/api/v1/audits/upload",
+                headers=headers,
+                files={"file": ("cadastro.xlsx", content.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        finally:
+            event.remove(self.engine, "before_cursor_execute", record)
+
+        self.assertEqual(response.status_code, 202)
+        inserts = [statement for statement in statements if statement.startswith("INSERT INTO audit_input_items")]
+        self.assertLessEqual(len(inserts), 3)
+        db = self.Session()
+        try:
+            saved = db.query(AuditInputItem).filter(AuditInputItem.audit_id == UUID(response.json()["audit_id"])).all()
+            self.assertEqual(len(saved), 300)
+            self.assertEqual(sum(item.cest_atual is None for item in saved), 150)
         finally:
             db.close()
 
