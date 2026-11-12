@@ -111,6 +111,15 @@ class NcmMatcher:
         codigo_normalizado = normalize_ncm(codigo)
         return self._por_codigo.get(codigo_normalizado) if codigo_normalizado else None
 
+    def codes_with_prefix(self, prefix: str) -> list[str]:
+        """Códigos vigentes que começam com o prefixo, em ordem."""
+        return sorted(codigo for codigo in self._por_codigo if codigo.startswith(prefix)) if prefix else []
+
+    def leaf_words(self, codigo: str) -> set[str]:
+        """Palavras da descrição do próprio código, sem "outro(a)", que não distingue nada."""
+        referencia = self._por_codigo.get(codigo)
+        return set(referencia.descricao_busca.split()) - {"outro", "outra"} if referencia else set()
+
     def codes_in_subheading(self, codigo: object) -> list[NcmReference]:
         """Códigos vigentes com os mesmos 6 primeiros dígitos (mesma subposição)."""
         digits = re.sub(r"\D", "", str(codigo or ""))

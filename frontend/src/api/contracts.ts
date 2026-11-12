@@ -80,7 +80,7 @@ export interface AuditItem {
   // Se o NCM informado existe na tabela vigente; vazio em auditorias antigas.
   ncm_status?: "valid" | "invalid" | "missing" | null;
   // De onde veio a sugestão de NCM: produtos parecidos do cadastro ou tabela oficial.
-  ncm_fonte?: "catalogo" | "tabela" | "confirmado" | null;
+  ncm_fonte?: "confirmado" | "correlacao" | "sinonimo" | "catalogo" | "familia" | "tabela" | null;
   ncm_vizinhos?: CatalogNeighbor[];
   // NCM extinto: códigos vigentes da mesma subposição, para escolha na revisão.
   ncm_opcoes?: NcmOption[];

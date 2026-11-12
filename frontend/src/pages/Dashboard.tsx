@@ -230,7 +230,7 @@ function ncmResult(item: AuditItem): ClassificationResult {
       ? { label: "Diferente do código confirmado", tone: "warning" }
       : { label: "Código confirmado", tone: "info" };
   }
-  if (item.ncm_status === "invalid") return { label: "Inexistente", tone: "danger" };
+  if (item.ncm_status === "invalid") return { label: item.ncm_fonte === "correlacao" ? "Extinto" : "Inexistente", tone: "danger" };
   if (item.ncm_status === "missing") return { label: "Não informado", tone: "danger" };
   if (item.ncm_fonte === "confirmado") {
     return item.ncm_sugerido
@@ -238,6 +238,7 @@ function ncmResult(item: AuditItem): ClassificationResult {
       : { label: "Confirmado anteriormente", tone: "success" };
   }
   if (item.ncm_sugerido && item.ncm_fonte === "catalogo") return { label: "Diferente de produtos parecidos", tone: "warning" };
+  if (item.ncm_sugerido && item.ncm_fonte === "familia") return { label: "Diferente da família no cadastro", tone: "warning" };
   return item.ncm_sugerido
     ? { label: "Alteração sugerida", tone: "warning" }
     : { label: "Sem alteração sugerida", tone: "neutral" };
@@ -1368,7 +1369,7 @@ function EvidencePanel({ item, fullReason }: { item: AuditItem; fullReason: bool
   const neighbors = item.ncm_vizinhos ?? [];
   return <dl className="evidence">
     {fullReason ? <div className="evidence-reason"><dt>Motivo</dt><dd>{item.motivo}</dd></div> : null}
-    {item.ncm_fonte ? <div><dt>Fonte da sugestão de NCM</dt><dd>{item.ncm_fonte === "confirmado" ? "Código confirmado pela sua empresa" : item.ncm_fonte === "catalogo" ? "Produtos parecidos do seu cadastro" : "Tabela NCM oficial, pela semelhança da descrição"}</dd></div> : null}
+    {item.ncm_fonte ? <div><dt>Fonte da sugestão de NCM</dt><dd>{NCM_SOURCE_LABELS[item.ncm_fonte]}</dd></div> : null}
     {neighbors.length ? <div className="evidence-neighbors">
       <dt>Produtos parecidos no cadastro</dt>
       <dd><ul>{neighbors.map((neighbor) => <li key={`${neighbor.codigo_produto}-${neighbor.ncm}`}>
@@ -1384,6 +1385,15 @@ function EvidencePanel({ item, fullReason }: { item: AuditItem; fullReason: bool
     {attempts.length ? <div className="evidence-attempts"><dt>Consultas realizadas</dt><dd><ul>{attempts.map((attempt, index) => <li key={`${attempt.source}-${attempt.state}-${index}`}><strong>{attempt.source}</strong>: {attempt.state}{attempt.detail ? ` (${attempt.detail})` : ""}</li>)}</ul></dd></div> : null}
   </dl>;
 }
+
+const NCM_SOURCE_LABELS: Record<NonNullable<AuditItem["ncm_fonte"]>, string> = {
+  confirmado: "Código confirmado pela sua empresa",
+  correlacao: "Tabela oficial de correlação NCM 2017×2022 (MDIC/Camex)",
+  sinonimo: "Dicionário de famílias de produtos de varejo",
+  catalogo: "Produtos parecidos do seu cadastro",
+  familia: "Produtos do seu cadastro que começam com as mesmas palavras",
+  tabela: "Tabela NCM oficial, pela descrição (confiança baixa)",
+};
 
 function formatCestStatus(status: string) {
   const labels: Record<string, string> = {

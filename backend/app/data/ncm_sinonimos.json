@@ -1,0 +1,817 @@
+{
+ "versao": "proposta-1",
+ "regra": "Cada termo e comparado com o INICIO do texto de comparacao do produto (matching_text: sem acento, sem plural, sem stopwords/medidas). Vale o termo mais longo que casar. 'consulta' e o trecho da tabela NCM (descricao hierarquica) que justifica o codigo e serve para reencontra-lo se a tabela mudar; 'ncm' e o codigo vigente que a consulta resolve hoje.",
+ "entradas": [
+  {
+   "familia": "Massas recheadas (lasanha, ravioli...)",
+   "termos": [
+    "lasanha",
+    "ravioli",
+    "capeletti",
+    "capelete",
+    "capelleti",
+    "canelone",
+    "rondelli",
+    "rondele",
+    "sofioli",
+    "tortei"
+   ],
+   "consulta": "massas alimenticias recheadas mesmo cozidas preparadas outro modo",
+   "ncm": "19022000"
+  },
+  {
+   "familia": "Macarrao instantaneo",
+   "termos": [
+    "macarrao instantaneo",
+    "mac instantaneo",
+    "lamen",
+    "miojo",
+    "cup noodle"
+   ],
+   "consulta": "outras massas alimenticias",
+   "ncm": "19023000"
+  },
+  {
+   "familia": "Lava-roupas / sabao em po ou liquido",
+   "termos": [
+    "lava roupa",
+    "lav roupa",
+    "sabao po",
+    "sabao em po",
+    "sab po",
+    "sabao liquido",
+    "sab liquido",
+    "sab liq",
+    "lava louca",
+    "lava loucas"
+   ],
+   "consulta": "preparacoes para lavagem limpeza acondicionadas para venda a retalho",
+   "ncm": "34025000"
+  },
+  {
+   "familia": "Limpadores / multiuso / detergente",
+   "termos": [
+    "limpador",
+    "limp",
+    "multiuso",
+    "multi uso",
+    "detergente",
+    "deterg",
+    "desengordurante",
+    "limpa vidro",
+    "limpa piso",
+    "tira limo",
+    "tira mancha",
+    "saponaceo",
+    "sapolio"
+   ],
+   "consulta": "preparacoes para lavagem limpeza acondicionadas para venda a retalho",
+   "ncm": "34025000"
+  },
+  {
+   "familia": "Sabao em barra",
+   "termos": [
+    "sabao barra",
+    "sab barra",
+    "sabao em barra"
+   ],
+   "consulta": "saboes outros barras pedacos",
+   "ncm": "34011900"
+  },
+  {
+   "familia": "Sabonete em barra",
+   "termos": [
+    "sabonete",
+    "sab barra sabonete"
+   ],
+   "consulta": "saboes de toucador outros",
+   "ncm": "34011190"
+  },
+  {
+   "familia": "Sabonete liquido",
+   "termos": [
+    "sabonete liquido",
+    "sabonete liq",
+    "sab liquido intimo",
+    "sabonete intimo"
+   ],
+   "consulta": "preparacoes organicos tensoativos para lavagem da pele liquido creme",
+   "ncm": "34013000"
+  },
+  {
+   "familia": "Amaciante de roupas",
+   "termos": [
+    "amaciante",
+    "amac"
+   ],
+   "consulta": "agentes de apresto acabamento industria textil outros",
+   "ncm": "38099190"
+  },
+  {
+   "familia": "Desinfetante",
+   "termos": [
+    "desinfetante",
+    "desinf"
+   ],
+   "consulta": "desinfetantes apresentados em embalagens para uso direto domissanitarias outros",
+   "ncm": "38089419"
+  },
+  {
+   "familia": "Agua sanitaria / cloro",
+   "termos": [
+    "agua sanitaria",
+    "cloro",
+    "hipoclorito"
+   ],
+   "consulta": "hipocloritos de sodio",
+   "ncm": "28289011"
+  },
+  {
+   "familia": "Inseticida",
+   "termos": [
+    "inseticida",
+    "mata mosquito",
+    "mata barata"
+   ],
+   "consulta": "inseticidas apresentados para uso direto domissanitarias outros",
+   "ncm": "38089119"
+  },
+  {
+   "familia": "Lustra-moveis",
+   "termos": [
+    "lustra movel",
+    "lustra moveis",
+    "lustramoveis"
+   ],
+   "consulta": "encausticas conservacao limpeza moveis de madeira",
+   "ncm": "34052000"
+  },
+  {
+   "familia": "Odorizador de ambiente",
+   "termos": [
+    "odorizador",
+    "odorizante",
+    "aromatizador",
+    "bom ar",
+    "desodorizador ambiente"
+   ],
+   "consulta": "preparacoes para perfumar desodorizar ambientes outras",
+   "ncm": "33074900"
+  },
+  {
+   "familia": "Palha de aco / esponja de aco",
+   "termos": [
+    "palha aco",
+    "la aco",
+    "esponja aco"
+   ],
+   "consulta": "palha de ferro aco esponjas",
+   "ncm": "73231000"
+  },
+  {
+   "familia": "Saco de lixo",
+   "termos": [
+    "saco lixo",
+    "saco p lixo",
+    "saco para lixo"
+   ],
+   "consulta": "sacos de polimeros de etileno outros",
+   "ncm": "39232190"
+  },
+  {
+   "familia": "Papel higienico",
+   "termos": [
+    "papel higienico",
+    "pap higienico",
+    "pap hig",
+    "papel hig"
+   ],
+   "consulta": "papel higienico",
+   "ncm": "48181000"
+  },
+  {
+   "familia": "Papel toalha / lenco de papel",
+   "termos": [
+    "papel toalha",
+    "toalha papel",
+    "lenco papel"
+   ],
+   "consulta": "lencos toalhas de mao",
+   "ncm": "48182000"
+  },
+  {
+   "familia": "Guardanapo",
+   "termos": [
+    "guardanapo"
+   ],
+   "consulta": "toalhas de mesa guardanapos",
+   "ncm": "48183000"
+  },
+  {
+   "familia": "Papel aluminio",
+   "termos": [
+    "papel aluminio",
+    "aluminio rolo"
+   ],
+   "consulta": "folhas e tiras delgadas de aluminio outras",
+   "ncm": "76071990"
+  },
+  {
+   "familia": "Fralda / absorvente",
+   "termos": [
+    "fralda",
+    "absorvente",
+    "protetor diario"
+   ],
+   "consulta": "absorventes tampoes higienicos fraldas",
+   "ncm": "96190000"
+  },
+  {
+   "familia": "Creme dental",
+   "termos": [
+    "creme dental",
+    "cr dental",
+    "gel dental",
+    "pasta dental"
+   ],
+   "consulta": "dentifricios",
+   "ncm": "33061000"
+  },
+  {
+   "familia": "Fio dental",
+   "termos": [
+    "fio dental"
+   ],
+   "consulta": "fios para limpar espacos interdentais",
+   "ncm": "33062000"
+  },
+  {
+   "familia": "Enxaguante bucal",
+   "termos": [
+    "enxaguante bucal",
+    "enxaguatorio",
+    "antisseptico bucal"
+   ],
+   "consulta": "preparacoes para higiene bucal outras",
+   "ncm": "33069000"
+  },
+  {
+   "familia": "Escova de dentes",
+   "termos": [
+    "escova dental",
+    "escova dente",
+    "esc dental"
+   ],
+   "consulta": "escovas de dentes",
+   "ncm": "96032100"
+  },
+  {
+   "familia": "Shampoo",
+   "termos": [
+    "shampoo",
+    "shampo",
+    "xampu",
+    "sh"
+   ],
+   "consulta": "xampus",
+   "ncm": "33051000"
+  },
+  {
+   "familia": "Condicionador / creme de pentear / tintura",
+   "termos": [
+    "condicionador",
+    "cond",
+    "creme pentear",
+    "creme para pentear",
+    "tintura",
+    "coloracao",
+    "mascara capilar"
+   ],
+   "consulta": "preparacoes capilares outras",
+   "ncm": "33059000"
+  },
+  {
+   "familia": "Protetor solar",
+   "termos": [
+    "protetor solar",
+    "bloqueador solar"
+   ],
+   "consulta": "preparacoes antissolares outros",
+   "ncm": "33049990"
+  },
+  {
+   "familia": "Aparelho de barbear",
+   "termos": [
+    "aparelho barbear",
+    "aparelho de barbear",
+    "prestobarba"
+   ],
+   "consulta": "navalhas aparelhos de barbear aparelhos",
+   "ncm": "82121020"
+  },
+  {
+   "familia": "Lamina de barbear",
+   "termos": [
+    "lamina barbear",
+    "carga barbear"
+   ],
+   "consulta": "laminas de barbear de seguranca esbocos em tiras laminas",
+   "ncm": "82122010"
+  },
+  {
+   "familia": "Arroz branco",
+   "termos": [
+    "arroz branco",
+    "arroz tipo",
+    "arroz agulhinha"
+   ],
+   "consulta": "arroz branqueado nao parboilizado polido",
+   "ncm": "10063021"
+  },
+  {
+   "familia": "Arroz parboilizado",
+   "termos": [
+    "arroz parboilizado",
+    "arroz parb"
+   ],
+   "consulta": "arroz branqueado parboilizado polido",
+   "ncm": "10063011"
+  },
+  {
+   "familia": "Feijao carioca",
+   "termos": [
+    "feijao carioca",
+    "feijao carioquinha"
+   ],
+   "consulta": "feijao comum phaseolus vulgaris outros",
+   "ncm": "07133399"
+  },
+  {
+   "familia": "Feijao preto",
+   "termos": [
+    "feijao preto"
+   ],
+   "consulta": "feijao comum preto outros",
+   "ncm": "07133319"
+  },
+  {
+   "familia": "Cafe torrado e moido",
+   "termos": [
+    "cafe torrado",
+    "cafe moido",
+    "cafe po",
+    "cafe tradicional",
+    "cafe extra forte"
+   ],
+   "consulta": "cafe torrado nao descafeinado",
+   "ncm": "09012100"
+  },
+  {
+   "familia": "Cafe soluvel",
+   "termos": [
+    "cafe soluvel",
+    "nescafe"
+   ],
+   "consulta": "cafe soluvel",
+   "ncm": "21011110"
+  },
+  {
+   "familia": "Leite condensado",
+   "termos": [
+    "leite condensado"
+   ],
+   "consulta": "leite creme de leite concentrados adicionados de acucar outros outros",
+   "ncm": "04029900"
+  },
+  {
+   "familia": "Leite em po",
+   "termos": [
+    "leite po",
+    "leite em po"
+   ],
+   "consulta": "leite em po materias gordas superior sem adicao de acucar leite integral",
+   "ncm": "04022110"
+  },
+  {
+   "familia": "Requeijao",
+   "termos": [
+    "requeijao"
+   ],
+   "consulta": "queijos frescos requeijao outros",
+   "ncm": "04061090"
+  },
+  {
+   "familia": "Manteiga",
+   "termos": [
+    "manteiga"
+   ],
+   "consulta": "manteiga",
+   "ncm": "04051000"
+  },
+  {
+   "familia": "Margarina",
+   "termos": [
+    "margarina",
+    "creme vegetal"
+   ],
+   "consulta": "margarina",
+   "ncm": "15171000"
+  },
+  {
+   "familia": "Oleo de soja",
+   "termos": [
+    "oleo soja",
+    "oleo de soja"
+   ],
+   "consulta": "oleo de soja refinado recipientes 5 l",
+   "ncm": "15079011"
+  },
+  {
+   "familia": "Azeite extra virgem",
+   "termos": [
+    "azeite",
+    "azeite oliva",
+    "azeite extra virgem"
+   ],
+   "consulta": "azeite de oliva extra virgem",
+   "ncm": "15092000"
+  },
+  {
+   "familia": "Maionese",
+   "termos": [
+    "maionese"
+   ],
+   "consulta": "maionese embalagens 1 kg",
+   "ncm": "21039011"
+  },
+  {
+   "familia": "Ketchup / molho de tomate",
+   "termos": [
+    "ketchup",
+    "catchup",
+    "molho tomate",
+    "molho de tomate"
+   ],
+   "consulta": "ketchup outros molhos de tomate embalagens imediatas conteudo inferior igual 1 kg",
+   "ncm": "21032010"
+  },
+  {
+   "familia": "Molho de soja (shoyu)",
+   "termos": [
+    "molho shoyu",
+    "shoyu",
+    "molho soja"
+   ],
+   "consulta": "molho de soja embalagens 1 kg",
+   "ncm": "21031010"
+  },
+  {
+   "familia": "Mostarda",
+   "termos": [
+    "mostarda"
+   ],
+   "consulta": "mostarda preparada embalagens 1 kg",
+   "ncm": "21033021"
+  },
+  {
+   "familia": "Extrato de tomate",
+   "termos": [
+    "extrato tomate",
+    "extrato de tomate",
+    "polpa tomate"
+   ],
+   "consulta": "tomates preparados conservados outros",
+   "ncm": "20029000"
+  },
+  {
+   "familia": "Temperos prontos",
+   "termos": [
+    "tempero",
+    "sazon"
+   ],
+   "consulta": "condimentos temperos compostos embalagens imediatas conteudo inferior igual 1 kg",
+   "ncm": "21039021"
+  },
+  {
+   "familia": "Farinha de trigo",
+   "termos": [
+    "farinha trigo",
+    "farinha de trigo"
+   ],
+   "consulta": "farinhas de trigo",
+   "ncm": "11010010"
+  },
+  {
+   "familia": "Fuba / farinha de milho",
+   "termos": [
+    "fuba",
+    "farinha milho"
+   ],
+   "consulta": "farinha de milho",
+   "ncm": "11022000"
+  },
+  {
+   "familia": "Amido de milho",
+   "termos": [
+    "amido milho",
+    "maisena"
+   ],
+   "consulta": "amido de milho",
+   "ncm": "11081200"
+  },
+  {
+   "familia": "Mistura para bolo",
+   "termos": [
+    "mistura bolo",
+    "mistura para bolo",
+    "massa bolo",
+    "massa para bolo"
+   ],
+   "consulta": "misturas pastas preparacao produtos padaria pastelaria outras",
+   "ncm": "19012090"
+  },
+  {
+   "familia": "Biscoito wafer",
+   "termos": [
+    "wafer",
+    "biscoito wafer"
+   ],
+   "consulta": "waffles wafers",
+   "ncm": "19053200"
+  },
+  {
+   "familia": "Biscoito doce / rosquinha",
+   "termos": [
+    "biscoito recheado",
+    "rosquinha",
+    "biscoito doce",
+    "biscoito maisena",
+    "bolacha recheada"
+   ],
+   "consulta": "bolachas biscoitos adicionados de edulcorantes",
+   "ncm": "19053100"
+  },
+  {
+   "familia": "Biscoito salgado",
+   "termos": [
+    "cream cracker",
+    "biscoito agua sal",
+    "biscoito salgado",
+    "biscoito cream cracker"
+   ],
+   "consulta": "bolachas biscoitos outros",
+   "ncm": "19059020"
+  },
+  {
+   "familia": "Salgadinho",
+   "termos": [
+    "salgadinho",
+    "salg",
+    "snack milho"
+   ],
+   "consulta": "produtos base cereais obtidos por expansao torrefacao",
+   "ncm": "19041000"
+  },
+  {
+   "familia": "Batata palha / chips",
+   "termos": [
+    "batata palha",
+    "batata chips",
+    "batata frita"
+   ],
+   "consulta": "produtos horticolas preparados conservados nao congelados batatas",
+   "ncm": "20052000"
+  },
+  {
+   "familia": "Achocolatado",
+   "termos": [
+    "achocolatado"
+   ],
+   "consulta": "chocolate preparacoes alimenticias que contenham cacau outros",
+   "ncm": "18069000"
+  },
+  {
+   "familia": "Bala / confeito",
+   "termos": [
+    "bala",
+    "drops",
+    "confeito"
+   ],
+   "consulta": "caramelos confeitos dropes pastilhas",
+   "ncm": "17049020"
+  },
+  {
+   "familia": "Goma de mascar",
+   "termos": [
+    "chiclete",
+    "goma mascar",
+    "chicle"
+   ],
+   "consulta": "gomas de mascar pastilhas elasticas revestidas de acucar",
+   "ncm": "17041000"
+  },
+  {
+   "familia": "Sorvete / picole",
+   "termos": [
+    "sorvete",
+    "picole",
+    "pote sorvete"
+   ],
+   "consulta": "sorvetes gelados embalagens imediatas conteudo inferior igual 2 kg",
+   "ncm": "21050010"
+  },
+  {
+   "familia": "Refresco em po",
+   "termos": [
+    "refresco",
+    "refresco po",
+    "suco po",
+    "suco em po"
+   ],
+   "consulta": "preparacoes para elaboracao de bebidas",
+   "ncm": "21069010"
+  },
+  {
+   "familia": "Refrigerante",
+   "termos": [
+    "refrigerante",
+    "refri"
+   ],
+   "consulta": "aguas adicionadas de acucar aromatizadas",
+   "ncm": "22021000"
+  },
+  {
+   "familia": "Agua mineral",
+   "termos": [
+    "agua mineral",
+    "agua com gas",
+    "agua sem gas"
+   ],
+   "consulta": "aguas minerais gaseificadas",
+   "ncm": "22011000"
+  },
+  {
+   "familia": "Energetico / isotonico",
+   "termos": [
+    "energetico",
+    "bebida energetica",
+    "isotonico"
+   ],
+   "consulta": "aguas bebidas nao alcoolicas outras outras",
+   "ncm": "22029900"
+  },
+  {
+   "familia": "Cerveja",
+   "termos": [
+    "cerveja",
+    "cerv"
+   ],
+   "consulta": "cervejas de malte",
+   "ncm": "22030000"
+  },
+  {
+   "familia": "Vinho",
+   "termos": [
+    "vinho"
+   ],
+   "consulta": "vinhos de uvas frescas recipientes capacidade nao superior 2 l",
+   "ncm": "22042100"
+  },
+  {
+   "familia": "Cachaca",
+   "termos": [
+    "cachaca",
+    "aguardente"
+   ],
+   "consulta": "rum aguardentes cana",
+   "ncm": "22084000"
+  },
+  {
+   "familia": "Vodca",
+   "termos": [
+    "vodka",
+    "vodca"
+   ],
+   "consulta": "vodca",
+   "ncm": "22086000"
+  },
+  {
+   "familia": "Vinagre",
+   "termos": [
+    "vinagre"
+   ],
+   "consulta": "vinagres",
+   "ncm": "22090000"
+  },
+  {
+   "familia": "Sal de mesa",
+   "termos": [
+    "sal refinado",
+    "sal grosso",
+    "sal iodado",
+    "sal"
+   ],
+   "consulta": "sal de mesa",
+   "ncm": "25010020"
+  },
+  {
+   "familia": "Conservas: milho, ervilha, palmito, azeitona",
+   "termos": [
+    "milho verde",
+    "milho conserva",
+    "ervilha",
+    "palmito",
+    "azeitona"
+   ],
+   "consulta": "produtos horticolas preparados conservados nao congelados milho doce zea mays",
+   "ncm": "20058000",
+   "ncm_por_termo": {
+    "ervilha": "20054000",
+    "palmito": "20089100",
+    "azeitona": "20057000"
+   }
+  },
+  {
+   "familia": "Atum / sardinha em conserva",
+   "termos": [
+    "atum",
+    "sardinha"
+   ],
+   "consulta": "preparacoes conservas de peixes inteiros pedacos atuns",
+   "ncm": "16041410",
+   "ncm_por_termo": {
+    "sardinha": "16041310"
+   }
+  },
+  {
+   "familia": "Embutidos (linguica, salsicha, mortadela, salame)",
+   "termos": [
+    "linguica",
+    "salsicha",
+    "mortadela",
+    "salame"
+   ],
+   "consulta": "enchidos produtos semelhantes de carne",
+   "ncm": "16010000"
+  },
+  {
+   "familia": "Racao para caes e gatos",
+   "termos": [
+    "racao cao",
+    "racao gato",
+    "racao caes",
+    "racao gatos",
+    "racao"
+   ],
+   "consulta": "alimentos para caes gatos acondicionados venda retalho",
+   "ncm": "23091000"
+  },
+  {
+   "familia": "Vela",
+   "termos": [
+    "vela"
+   ],
+   "consulta": "velas pavios cirios",
+   "ncm": "34060000"
+  },
+  {
+   "familia": "Fosforo",
+   "termos": [
+    "fosforo"
+   ],
+   "consulta": "fosforos exceto artigos de pirotecnia",
+   "ncm": "36050000"
+  },
+  {
+   "familia": "Copo / prato descartavel",
+   "termos": [
+    "copo descartavel",
+    "prato descartavel",
+    "talher descartavel"
+   ],
+   "consulta": "servicos de mesa utensilios de mesa cozinha plastico",
+   "ncm": "39241000"
+  },
+  {
+   "familia": "Rodo / vassoura",
+   "termos": [
+    "rodo",
+    "vassoura"
+   ],
+   "consulta": "vassouras escovas rodos de borracha outros",
+   "ncm": "96039000"
+  },
+  {
+   "familia": "Pano de chao / flanela",
+   "termos": [
+    "pano chao",
+    "pano de chao",
+    "flanela",
+    "pano prato"
+   ],
+   "consulta": "rodilhas esfregoes panos de prato flanelas",
+   "ncm": "63071000"
+  }
+ ],
+ "fonte": "Dicionário de famílias de produtos de varejo -> NCM, montado e medido numa planilha real de supermercado (nov/2026)."
+}

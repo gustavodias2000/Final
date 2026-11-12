@@ -4,37 +4,66 @@ Este módulo não conhece FastAPI, SQLAlchemy ou componentes visuais. Sua saída
 é uma recomendação explicável, que deve ser revisada antes de qualquer uso
 fiscal.
 
-Ordem das evidências, da mais forte para a mais fraca:
-0. Código confirmado pela empresa (aprovado antes ou importado), pelo código do produto ou
-   por descrição praticamente idêntica.
-1. Produtos parecidos do próprio cadastro (CatalogIndex), quando concordam entre si.
-2. Compatibilidade da descrição com o NCM atual na tabela oficial.
-3. Semelhança da descrição com a tabela oficial, só como reserva quando o NCM atual não
-   existe ou falta. Medida numa planilha real, ela quase nunca coincidia com o NCM informado,
-   então não é usada para sugerir troca de um NCM válido.
+Ordem das evidências, da mais forte para a mais fraca (medida numa planilha real de 3.700
+itens, deixando cada item fora das próprias evidências):
+
+NCM informado que existe na tabela vigente:
+  0. Código confirmado pela empresa (aprovado antes ou importado).
+  1. Produtos parecidos do cadastro, com voto de pelo menos 80% (alerta só com ~95% de precisão).
+  2. Família do cadastro: produtos que começam com as mesmas palavras, com 90% de concordância.
+  3. Compatibilidade da descrição com o próprio código na tabela oficial.
+  A semelhança com a tabela oficial nunca troca um NCM válido: medida, ela quase nunca
+  coincidia com o NCM informado.
+
+NCM informado que não existe (extinto ou fictício) ou que falta:
+  0. Código confirmado pela empresa.
+  1. Tabela oficial de correlação 2017×2022 (ou desdobramento do código nos códigos atuais).
+     Com um único destino, ele é a sugestão; com vários, as próximas evidências escolhem entre
+     eles e, sem escolha segura, a pessoa escolhe na revisão.
+  2. Dicionário de famílias de varejo (lasanha -> massas recheadas, limpador -> tensoativos).
+  3. Produtos parecidos e famílias do cadastro (~90% de precisão).
+  4. Palavras da descrição dos códigos candidatos, quando o código extinto tem sucessores.
+  5. Semelhança com a tabela oficial (confiança baixa).
 """
 
 import re
 from dataclasses import asdict, dataclass, field, replace
 from typing import Callable, Iterable
 
-from app.services.catalog_neighbors import CatalogConsensus, CatalogEntry, CatalogIndex, CatalogNeighbor
+from app.services.catalog_neighbors import (
+    ALERT_RULE,
+    SUGGEST_RULE,
+    CatalogEntry,
+    CatalogIndex,
+    CatalogNeighbor,
+    FamilyVote,
+)
 from app.services.confirmed_codes import ConfirmedCode, ConfirmedIndex, product_code_key
 from app.services.ncm_matcher import NcmMatcher, normalize_ncm, normalize_text
+from app.services.ncm_references import CORRELATION_SOURCE, Successors, successors, synonym_dictionary
 
 NCM_VALID = "valid"
 NCM_INVALID = "invalid"
 NCM_MISSING = "missing"
-SOURCE_CATALOG = "catalogo"
-SOURCE_TABLE = "tabela"
 SOURCE_CONFIRMED = "confirmado"
+SOURCE_CORRELATION = "correlacao"
+SOURCE_SYNONYM = "sinonimo"
+SOURCE_CATALOG = "catalogo"
+SOURCE_FAMILY = "familia"
+SOURCE_TABLE = "tabela"
 
 
 @dataclass(frozen=True)
 class AuditPolicy:
     compatibility_score: float = 70.0
-    # Sugestão pela tabela oficial quando o NCM atual não existe ou falta.
+    # Sugestão pela semelhança com a tabela oficial quando o NCM atual não existe ou falta.
     suggestion_score: float = 70.0
+    # Família do cadastro (começo da descrição): exemplos mínimos e concordância.
+    family2_min_count: int = 3
+    family1_min_count: int = 5
+    family_suggest_share: float = 0.7
+    family1_suggest_share: float = 0.8
+    family_alert_share: float = 0.9
     reference_source: str = "base_ncm"
     reference_version: str | None = None
 
@@ -62,10 +91,11 @@ class AuditFinding:
     versao_referencia: str | None
     # valid: existe na tabela vigente; invalid: informado mas inexistente; missing: não informado.
     ncm_status: str = NCM_VALID
-    # De onde veio a sugestão de NCM: "catalogo" (produtos parecidos) ou "tabela" (tabela oficial).
+    # De onde veio a sugestão (ou a confirmação) de NCM: confirmado, correlacao, sinonimo,
+    # catalogo, familia ou tabela.
     ncm_fonte: str | None = None
     ncm_vizinhos: tuple[dict[str, object], ...] = field(default_factory=tuple)
-    # NCM extinto: códigos vigentes da mesma subposição, para escolha na revisão.
+    # NCM extinto: códigos vigentes que o substituem, para escolha na revisão.
     ncm_opcoes: tuple[dict[str, object], ...] = field(default_factory=tuple)
 
     def as_dict(self) -> dict[str, object]:
@@ -73,6 +103,15 @@ class AuditFinding:
         data["ncm_vizinhos"] = [dict(neighbor) for neighbor in self.ncm_vizinhos]
         data["ncm_opcoes"] = [dict(option) for option in self.ncm_opcoes]
         return data
+
+
+@dataclass(frozen=True)
+class _Evidence:
+    """Evidência do cadastro calculada uma vez por produto."""
+
+    neighbors: list[CatalogNeighbor]
+    catalog: CatalogIndex | None
+    position: int | None
 
 
 def format_ncm(code: str | None) -> str:
@@ -92,6 +131,7 @@ class AuditEngine:
         self.policy = policy or AuditPolicy()
         self.matcher = NcmMatcher(base_ncm)
         self.confirmed = ConfirmedIndex(confirmed)
+        self.synonyms = synonym_dictionary()
         self._finding_cache: dict[tuple[str, str | None, str | None, str | None], AuditFinding] = {}
 
     def audit_product(
@@ -108,9 +148,7 @@ class AuditEngine:
             return replace(cached, codigo_produto=product.codigo_produto, descricao=product.descricao)
 
         neighbors = catalog.neighbors(product.descricao, exclude_position=position) if catalog else []
-        consensus = catalog.consensus(neighbors) if catalog else None
-        unanimous = catalog.consensus(neighbors, unanimous=True) if catalog else None
-        finding = self._audit_product_uncached(product, neighbors, consensus, unanimous)
+        finding = self._audit_product_uncached(product, _Evidence(neighbors, catalog, position))
         self._finding_cache[cache_key] = finding
         return finding
 
@@ -122,146 +160,6 @@ class AuditEngine:
             if (ncm := normalize_ncm(product.ncm_atual)) and self.matcher.find_by_code(ncm)
         ]
         return CatalogIndex(entries)
-
-    def _audit_product_uncached(
-        self,
-        product: ProductForAudit,
-        neighbors: list[CatalogNeighbor] | None = None,
-        consensus: CatalogConsensus | None = None,
-        unanimous: CatalogConsensus | None = None,
-    ) -> AuditFinding:
-        neighbors = neighbors or []
-        descricao = normalize_text(product.descricao)
-        ncm_atual = normalize_ncm(product.ncm_atual)
-        current_reference = self.matcher.find_by_code(ncm_atual)
-        ncm_status = NCM_VALID if current_reference else NCM_INVALID if _raw_ncm(product.ncm_atual) else NCM_MISSING
-        context = {"ncm_status": ncm_status, "ncm_vizinhos": tuple(n.as_dict() for n in neighbors)}
-        # A coluna guarda 8 dígitos; um código com outro tamanho aparece só no motivo.
-        stored_ncm = ncm_atual
-
-        if not descricao:
-            return self._without_suggestion(
-                product, stored_ncm, 0.0,
-                "A descrição do produto está vazia ou inválida; não há base para sugerir NCM.", **context,
-            )
-
-        # 0. Código confirmado pela empresa.
-        confirmed = self.confirmed.find(product.codigo_produto, product.descricao)
-        if confirmed is not None and self.matcher.find_by_code(confirmed.code.ncm):
-            return self._audit_confirmed(product, stored_ncm, ncm_status, confirmed, context)
-
-        if ncm_status != NCM_VALID:
-            return self._audit_unusable_ncm(product, stored_ncm, _raw_ncm(product.ncm_atual), ncm_status, consensus, context)
-
-        # 1. Produtos parecidos do cadastro.
-        if consensus is not None and consensus.ncm == ncm_atual:
-            return self._without_suggestion(
-                product, ncm_atual, consensus.best_score,
-                f"NCM atual igual ao de {consensus.votes} de {consensus.neighbors} produtos parecidos do cadastro.",
-                **context,
-            )
-        if unanimous is not None and unanimous.ncm != ncm_atual:
-            return self._suggest(
-                product, ncm_atual, unanimous.ncm, unanimous.best_score, SOURCE_CATALOG,
-                f"Os {unanimous.votes} produtos mais parecidos do cadastro usam {format_ncm(unanimous.ncm)}; "
-                f"este usa {format_ncm(ncm_atual)}. Confira qual está certo.",
-                context,
-            )
-
-        # 2. Compatibilidade com a tabela oficial.
-        current_score = self.matcher.score_against(descricao, current_reference)
-        if current_score >= self.policy.compatibility_score:
-            return self._without_suggestion(
-                product, ncm_atual, current_score,
-                "O NCM atual existe na referência e sua descrição é compatível com o produto.", **context,
-            )
-
-        return self._without_suggestion(
-            product, ncm_atual, current_score,
-            "O NCM atual existe na tabela vigente. A descrição não confirma esse código, e os produtos "
-            "parecidos do cadastro não bastam para indicar outro com segurança.",
-            **context,
-        )
-
-    def _audit_confirmed(self, product, stored_ncm, ncm_status, confirmed, context) -> AuditFinding:
-        code = confirmed.code
-        if code.ncm == stored_ncm:
-            return replace(
-                self._without_suggestion(
-                    product, stored_ncm, confirmed.score,
-                    f"NCM confirmado anteriormente ({confirmed.explanation()}).", **context,
-                ),
-                ncm_fonte=SOURCE_CONFIRMED,
-            )
-        # A origem da sugestão vem primeiro: é a frase que a fila mostra resumida.
-        problem = {
-            NCM_INVALID: f" Na planilha, o NCM {format_ncm(_raw_ncm(product.ncm_atual))} não existe na tabela NCM vigente.",
-            NCM_MISSING: " Na planilha, o NCM não foi informado.",
-            NCM_VALID: f" A planilha traz {format_ncm(stored_ncm)}.",
-        }[ncm_status]
-        return self._suggest(
-            product, stored_ncm, code.ncm, confirmed.score, SOURCE_CONFIRMED,
-            f"Código confirmado: NCM {format_ncm(code.ncm)} ({confirmed.explanation()}).{problem}",
-            context,
-        )
-
-    def _audit_unusable_ncm(
-        self,
-        product: ProductForAudit,
-        stored_ncm: str | None,
-        raw_ncm: str | None,
-        ncm_status: str,
-        consensus: CatalogConsensus | None,
-        context: dict[str, object],
-    ) -> AuditFinding:
-        problem = (
-            f"NCM {format_ncm(raw_ncm)} não existe na tabela NCM vigente."
-            if ncm_status == NCM_INVALID
-            else "NCM não informado."
-        )
-        if consensus is not None:
-            return self._suggest(
-                product, stored_ncm, consensus.ncm, consensus.best_score, SOURCE_CATALOG,
-                f"{problem} {consensus.votes} de {consensus.neighbors} produtos parecidos do cadastro usam "
-                f"{format_ncm(consensus.ncm)}.",
-                context,
-            )
-        # NCM extinto cuja subposição continua: os códigos atuais dela são os candidatos naturais.
-        successors = self.matcher.codes_in_subheading(raw_ncm) if ncm_status == NCM_INVALID else []
-        if len(successors) == 1:
-            return self._suggest(
-                product, stored_ncm, successors[0].codigo, 100.0, SOURCE_TABLE,
-                f"{problem} A subposição {format_ncm(raw_ncm)[:7]} hoje tem um único código: "
-                f"{format_ncm(successors[0].codigo)}.",
-                context,
-            )
-        if successors:
-            return replace(
-                self._without_suggestion(
-                    product, stored_ncm, 0.0,
-                    f"{problem} A subposição {format_ncm(raw_ncm)[:7]} hoje se divide em {len(successors)} "
-                    "códigos; escolha um na revisão.",
-                    **context,
-                ),
-                status="pending_review",
-                ncm_opcoes=tuple({"ncm": option.codigo, "descricao": option.descricao} for option in successors),
-            )
-        candidate = self.matcher.best_match(product.descricao)
-        if candidate is not None and candidate.score >= self.policy.suggestion_score:
-            return self._suggest(
-                product, stored_ncm, candidate.referencia.codigo, candidate.score, SOURCE_TABLE,
-                f"{problem} Sugestão pela semelhança da descrição com a tabela NCM; confira.",
-                context,
-            )
-        # Sem sugestão, mas o item precisa de atenção: vai para a fila de revisão.
-        return replace(
-            self._without_suggestion(
-                product, stored_ncm, candidate.score if candidate else 0.0,
-                f"{problem} Não foi possível sugerir um código com segurança; corrija o NCM no cadastro de origem.",
-                **context,
-            ),
-            status="pending_review",
-        )
 
     def audit_products(
         self,
@@ -282,6 +180,206 @@ class AuditEngine:
         if on_processed and findings and len(findings) % progress_every:
             on_processed(len(findings))
         return findings
+
+    # ------------------------------------------------------------------ decisão
+
+    def _audit_product_uncached(self, product: ProductForAudit, evidence: _Evidence | None = None) -> AuditFinding:
+        evidence = evidence or _Evidence([], None, None)
+        descricao = normalize_text(product.descricao)
+        ncm_atual = normalize_ncm(product.ncm_atual)
+        current_reference = self.matcher.find_by_code(ncm_atual)
+        raw_ncm = _raw_ncm(product.ncm_atual)
+        ncm_status = NCM_VALID if current_reference else NCM_INVALID if raw_ncm else NCM_MISSING
+        context = {"ncm_status": ncm_status, "ncm_vizinhos": tuple(n.as_dict() for n in evidence.neighbors)}
+
+        if not descricao:
+            return self._without_suggestion(
+                product, ncm_atual, 0.0,
+                "A descrição do produto está vazia ou inválida; não há base para sugerir NCM.", **context,
+            )
+
+        confirmed = self.confirmed.find(product.codigo_produto, product.descricao)
+        if confirmed is not None and self.matcher.find_by_code(confirmed.code.ncm):
+            return self._audit_confirmed(product, ncm_atual, ncm_status, confirmed, context)
+
+        if ncm_status != NCM_VALID:
+            return self._audit_unusable_ncm(product, ncm_atual, raw_ncm, ncm_status, evidence, context)
+        return self._audit_valid_ncm(product, ncm_atual, current_reference, evidence, context)
+
+    def _audit_valid_ncm(self, product, ncm_atual, current_reference, evidence, context) -> AuditFinding:
+        catalog = evidence.catalog
+        # 1. Produtos parecidos do cadastro.
+        if catalog is not None:
+            agreement = catalog.consensus(evidence.neighbors, SUGGEST_RULE)
+            if agreement is not None and agreement.ncm == ncm_atual:
+                return self._without_suggestion(
+                    product, ncm_atual, agreement.share * 100,
+                    f"NCM atual igual ao de {agreement.votes} de {agreement.neighbors} produtos parecidos do cadastro.",
+                    ncm_fonte=SOURCE_CATALOG, **context,
+                )
+            alert = catalog.consensus(evidence.neighbors, ALERT_RULE)
+            if alert is not None and alert.ncm != ncm_atual:
+                return self._suggest(
+                    product, ncm_atual, alert.ncm, alert.share * 100, SOURCE_CATALOG,
+                    f"{alert.votes} de {alert.neighbors} produtos parecidos do cadastro usam {format_ncm(alert.ncm)}; "
+                    f"este usa {format_ncm(ncm_atual)}. Confira qual está certo.",
+                    context,
+                )
+            # 2. Família do cadastro (começo da descrição).
+            family = self._family(product, evidence, alert_mode=True)
+            if family is not None:
+                if family.ncm == ncm_atual:
+                    return self._without_suggestion(
+                        product, ncm_atual, family.share * 100,
+                        f"NCM atual igual ao de {family.count} de {family.total} produtos do cadastro que começam "
+                        f"com \"{family.key}\".",
+                        ncm_fonte=SOURCE_FAMILY, **context,
+                    )
+                return self._suggest(
+                    product, ncm_atual, family.ncm, family.share * 100, SOURCE_FAMILY,
+                    f"{family.count} de {family.total} produtos do cadastro que começam com \"{family.key}\" usam "
+                    f"{format_ncm(family.ncm)}; este usa {format_ncm(ncm_atual)}. Confira qual está certo.",
+                    context,
+                )
+
+        # 3. Compatibilidade com a tabela oficial.
+        current_score = self.matcher.score_against(product.descricao, current_reference)
+        if current_score >= self.policy.compatibility_score:
+            return self._without_suggestion(
+                product, ncm_atual, current_score,
+                "O NCM atual existe na referência e sua descrição é compatível com o produto.", **context,
+            )
+        return self._without_suggestion(
+            product, ncm_atual, current_score,
+            "O NCM atual existe na tabela vigente. A descrição não confirma esse código, e os produtos "
+            "parecidos do cadastro não bastam para indicar outro com segurança.",
+            **context,
+        )
+
+    def _audit_unusable_ncm(self, product, stored_ncm, raw_ncm, ncm_status, evidence, context) -> AuditFinding:
+        problem = (
+            f"Na planilha, o NCM {format_ncm(raw_ncm)} não existe na tabela NCM vigente."
+            if ncm_status == NCM_INVALID
+            else "Na planilha, o NCM não foi informado."
+        )
+        found = successors(raw_ncm, self.matcher) if ncm_status == NCM_INVALID else None
+        allowed = set(found.codes) if found else None
+        options = tuple(
+            {"ncm": code, "descricao": reference.descricao if (reference := self.matcher.find_by_code(code)) else None}
+            for code in (found.codes if found and len(found.codes) > 1 else ())
+        )
+        lineage = _lineage(raw_ncm, found)
+
+        # 1. Correlação com um único destino.
+        if found and len(found.codes) == 1:
+            source = SOURCE_CORRELATION if found.origin == "correlacao" else SOURCE_TABLE
+            return self._suggest(product, stored_ncm, found.codes[0], 95.0, source, lineage, context)
+
+        def accept(code: str | None) -> bool:
+            return bool(code) and self.matcher.find_by_code(code) is not None and (allowed is None or code in allowed)
+
+        def suggest(code: str, score: float, source: str, reason: str) -> AuditFinding:
+            prefix = f"{lineage} " if options else ""
+            tail = "" if options else f" {problem}"
+            return replace(
+                self._suggest(product, stored_ncm, code, score, source, f"{prefix}{reason}{tail}", context),
+                ncm_opcoes=options,
+            )
+
+        # 2. Dicionário de famílias de varejo.
+        synonym = self.synonyms.lookup(product.descricao)
+        if synonym is not None and accept(synonym.ncm):
+            return suggest(
+                synonym.ncm, 85.0, SOURCE_SYNONYM,
+                f"\"{synonym.termo}\" é da família {synonym.familia}: NCM {format_ncm(synonym.ncm)}.",
+            )
+
+        # 3. Produtos parecidos e famílias do cadastro.
+        if evidence.catalog is not None:
+            consensus = evidence.catalog.consensus(evidence.neighbors, SUGGEST_RULE)
+            if consensus is not None and accept(consensus.ncm):
+                return suggest(
+                    consensus.ncm, consensus.share * 100, SOURCE_CATALOG,
+                    f"{consensus.votes} de {consensus.neighbors} produtos parecidos do cadastro usam "
+                    f"{format_ncm(consensus.ncm)}.",
+                )
+            family = self._family(product, evidence, alert_mode=False)
+            if family is not None and accept(family.ncm):
+                return suggest(
+                    family.ncm, family.share * 100, SOURCE_FAMILY,
+                    f"{family.count} de {family.total} produtos do cadastro que começam com \"{family.key}\" usam "
+                    f"{format_ncm(family.ncm)}.",
+                )
+
+        # 4. Palavras da descrição dos códigos candidatos.
+        if found and len(found.codes) > 1:
+            words = set(_matching_tokens(product.descricao))
+            scored = sorted(((len(words & self.matcher.leaf_words(code)), code) for code in found.codes), reverse=True)
+            if scored[0][0] > 0 and scored[0][0] > scored[1][0]:
+                code = scored[0][1]
+                return suggest(
+                    code, 60.0, SOURCE_TABLE,
+                    f"A descrição do código {format_ncm(code)} é a que mais se parece com a do produto.",
+                )
+
+        # 5. Semelhança com a tabela oficial (confiança baixa).
+        candidate = self.matcher.best_match(product.descricao)
+        if candidate is not None and candidate.score >= self.policy.suggestion_score and accept(candidate.referencia.codigo):
+            return suggest(
+                candidate.referencia.codigo, min(candidate.score, 60.0), SOURCE_TABLE,
+                "Sugestão pela semelhança da descrição com a tabela NCM (confiança baixa); confira.",
+            )
+
+        if options:
+            return replace(
+                self._without_suggestion(
+                    product, stored_ncm, 0.0, f"{lineage} Escolha um na revisão.", **context,
+                ),
+                status="pending_review",
+                ncm_opcoes=options,
+                ncm_fonte=SOURCE_CORRELATION if found and found.origin == "correlacao" else None,
+            )
+        return replace(
+            self._without_suggestion(
+                product, stored_ncm, 0.0,
+                f"{problem} Não foi possível sugerir um código com segurança; corrija o NCM no cadastro de origem.",
+                **context,
+            ),
+            status="pending_review",
+        )
+
+    def _family(self, product: ProductForAudit, evidence: _Evidence, alert_mode: bool) -> FamilyVote | None:
+        if evidence.catalog is None:
+            return None
+        by_two, by_one = evidence.catalog.family(product.descricao, exclude_position=evidence.position)
+        policy = self.policy
+        two_share = policy.family_alert_share if alert_mode else policy.family_suggest_share
+        one_share = policy.family_alert_share if alert_mode else policy.family1_suggest_share
+        if by_two is not None and by_two.total >= policy.family2_min_count and by_two.share >= two_share:
+            return by_two
+        if by_one is not None and by_one.total >= policy.family1_min_count and by_one.share >= one_share:
+            return by_one
+        return None
+
+    def _audit_confirmed(self, product, stored_ncm, ncm_status, confirmed, context) -> AuditFinding:
+        code = confirmed.code
+        if code.ncm == stored_ncm:
+            return self._without_suggestion(
+                product, stored_ncm, confirmed.score,
+                f"NCM confirmado anteriormente ({confirmed.explanation()}).",
+                ncm_fonte=SOURCE_CONFIRMED, **context,
+            )
+        # A origem da sugestão vem primeiro: é a frase que a fila mostra resumida.
+        problem = {
+            NCM_INVALID: f" Na planilha, o NCM {format_ncm(_raw_ncm(product.ncm_atual))} não existe na tabela NCM vigente.",
+            NCM_MISSING: " Na planilha, o NCM não foi informado.",
+            NCM_VALID: f" A planilha traz {format_ncm(stored_ncm)}.",
+        }[ncm_status]
+        return self._suggest(
+            product, stored_ncm, code.ncm, confirmed.score, SOURCE_CONFIRMED,
+            f"Código confirmado: NCM {format_ncm(code.ncm)} ({confirmed.explanation()}).{problem}",
+            context,
+        )
 
     def _suggest(
         self,
@@ -331,6 +429,25 @@ class AuditEngine:
             versao_referencia=self.policy.reference_version,
             **context,
         )
+
+
+def _lineage(raw_ncm: str | None, found: Successors | None) -> str:
+    """Frase que explica de onde vêm os códigos que substituem um NCM extinto."""
+    if not found:
+        return ""
+    count = len(found.codes)
+    target = format_ncm(found.codes[0]) if count == 1 else f"{count} códigos"
+    if found.origin == "correlacao":
+        return f"O NCM {format_ncm(raw_ncm)} foi extinto e, pela {CORRELATION_SOURCE}, corresponde hoje a {target}."
+    if count == 1:
+        return f"O NCM {format_ncm(raw_ncm)} não existe mais; o único código atual que começa como ele é {target}."
+    return f"O NCM {format_ncm(raw_ncm)} não existe mais e hoje se divide em {target}."
+
+
+def _matching_tokens(value: object) -> list[str]:
+    from app.services.ncm_matcher import matching_text
+
+    return matching_text(value).split()
 
 
 def _raw_ncm(value: object) -> str | None:

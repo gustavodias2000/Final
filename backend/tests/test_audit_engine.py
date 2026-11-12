@@ -5,6 +5,7 @@ from rapidfuzz import process as rapidfuzz_process
 
 from app.services.audit_engine import AuditEngine, ProductForAudit
 from app.services.confirmed_codes import ConfirmedCode
+from app.services.catalog_neighbors import CatalogEntry, CatalogIndex
 from app.services.ncm_matcher import NcmMatcher, matching_text, normalize_ncm, normalize_text
 
 
@@ -128,7 +129,7 @@ class NcmValidityAndCatalogTests(unittest.TestCase):
         [result] = self.engine.audit_products([ProductForAudit("SKU-1", "Xilofone artesanal", None, None)])
 
         self.assertEqual(result.ncm_status, "missing")
-        self.assertIn("NCM não informado", result.motivo)
+        self.assertIn("o NCM não foi informado", result.motivo)
 
     def test_invalid_ncm_takes_the_ncm_shared_by_similar_catalog_products(self) -> None:
         findings = self.engine.audit_products([
@@ -247,7 +248,7 @@ class ConfirmedCodesAndExtinctNcmTests(unittest.TestCase):
         self.assertEqual(result.status, "pending_review")
         self.assertIsNone(result.ncm_sugerido)
         self.assertEqual([option["ncm"] for option in result.ncm_opcoes], ["19012010", "19012020", "19012090"])
-        self.assertIn("A subposição 1901.20 hoje se divide em 3 códigos", result.motivo)
+        self.assertIn("O NCM 1901.20.00 não existe mais e hoje se divide em 3 códigos", result.motivo)
 
     def test_extinct_ncm_with_a_single_current_code_in_its_subheading_is_suggested(self) -> None:
         engine = AuditEngine([("1905.90.90", "Outros")])
@@ -255,4 +256,77 @@ class ConfirmedCodesAndExtinctNcmTests(unittest.TestCase):
         [result] = engine.audit_products([ProductForAudit("SKU", "Xilofone", "1905.90.10", None)])
 
         self.assertEqual(result.ncm_sugerido, "19059090")
-        self.assertIn("hoje tem um único código", result.motivo)
+        self.assertIn("o único código atual que começa como ele é 1905.90.90", result.motivo)
+
+
+class PhaseOneEvidenceTests(unittest.TestCase):
+    """Casos reais de uma planilha de supermercado que ficavam sem sugestão."""
+
+    REFERENCE = [
+        ("3402.50.00", "- Preparações acondicionadas para venda a retalho"),
+        ("3402.90.31", "Preparações tensoativas"),
+        ("1902.20.00", "- Massas alimentícias recheadas (mesmo cozidas ou preparadas de outro modo)"),
+        ("1902.19.00", "-- Outras"),
+        ("1509.20.00", "- Azeite de oliva extra virgem"),
+        ("1509.30.00", "- Azeite de oliva virgem"),
+        ("1509.40.00", "- Outros azeites de oliva virgens"),
+        ("2103.90.11", "Maionese"),
+        ("2103.90.19", "Outros"),
+    ]
+
+    def test_extinct_code_follows_the_official_correlation_table(self) -> None:
+        [result] = AuditEngine(self.REFERENCE).audit_products([
+            ProductForAudit("7896241900093", "LAVA ROUPAS KLIP ORIGINAL 1L", "3402.20.00", None),
+        ])
+
+        self.assertEqual(result.ncm_sugerido, "34025000")
+        self.assertEqual(result.ncm_fonte, "correlacao")
+        self.assertEqual(result.ncm_status, "invalid")
+        self.assertIn("Tabela de Correlação NCM 2017×2022", result.motivo)
+
+    def test_extinct_code_with_several_successors_offers_them_as_options(self) -> None:
+        [result] = AuditEngine(self.REFERENCE).audit_products([
+            ProductForAudit("1", "PRODUTO QUALQUER", "1509.10.00", None),
+        ])
+
+        self.assertEqual(result.status, "pending_review")
+        self.assertEqual([option["ncm"] for option in result.ncm_opcoes], ["15092000", "15093000", "15094000"])
+        self.assertEqual(result.ncm_fonte, "correlacao")
+
+    def test_retail_synonym_classifies_a_product_the_table_does_not_name(self) -> None:
+        [result] = AuditEngine(self.REFERENCE).audit_products([
+            ProductForAudit("7891515475703", "LASANHA SADIA BOLONHESA", "9999.99.99", None),
+        ])
+
+        self.assertEqual(result.ncm_sugerido, "19022000")
+        self.assertEqual(result.ncm_fonte, "sinonimo")
+        self.assertTrue(result.motivo.startswith('"lasanha" é da família'))
+
+    def test_valid_ncm_diverging_from_its_whole_family_is_flagged(self) -> None:
+        products = [ProductForAudit(str(index), f"MAIONESE MARCA{index} {index}00G", "2103.90.11", None) for index in range(10)]
+        products.append(ProductForAudit("X", "MAIONESE BAG VIGOR 1KG", "2103.90.19", None))
+
+        result = AuditEngine(self.REFERENCE).audit_products(products)[-1]
+
+        self.assertEqual(result.status, "suggested")
+        self.assertEqual(result.ncm_sugerido, "21039011")
+        self.assertIn(result.ncm_fonte, {"catalogo", "familia"})
+        self.assertIn("Confira qual está certo", result.motivo)
+
+    def test_rare_words_weigh_more_than_brands_when_finding_similar_products(self) -> None:
+        index = CatalogIndex([
+            CatalogEntry(0, "A", "LASANHA SEARA 600G", "19022000"),
+            CatalogEntry(1, "B", "PIZZA SADIA CALABRESA", "19059090"),
+            CatalogEntry(2, "C", "PRESUNTO SADIA", "16024100"),
+            CatalogEntry(3, "D", "NUGGETS SADIA", "16023220"),
+        ])
+
+        [best, *_] = index.neighbors("LASANHA SADIA BOLONHESA")
+
+        self.assertEqual(best.ncm, "19022000")
+
+    def test_reference_files_ship_with_the_project(self) -> None:
+        from app.services.ncm_references import correlation_map, synonym_dictionary
+
+        self.assertEqual(correlation_map()["34022000"], ["34025000"])
+        self.assertEqual(synonym_dictionary().lookup("LIMPADOR VEJA MULTI USO").ncm, "34025000")
